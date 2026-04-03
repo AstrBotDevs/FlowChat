@@ -29,7 +29,11 @@ export default function AuthLayout({
       </div>
 
       <div className="hidden flex-1 flex-col overflow-hidden pl-12 xl:flex">
-        <div className="flex-1 pt-12">
+        <div className="flex items-center gap-1.5 pt-8 text-[13px] text-muted-foreground/50">
+          Powered by
+          <span className="font-medium text-muted-foreground">AI SDK</span>
+        </div>
+        <div className="flex-1 pt-4">
           <Preview />
         </div>
       </div>

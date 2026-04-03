@@ -377,40 +377,6 @@ textarea:focus-visible {
   animation: glow-pulse 2s ease-in-out infinite;
 }
 
-/* Quote highlight marks */
-mark.quote-highlight {
-  all: unset;
-  border-bottom: 1.5px solid oklch(0.55 0.12 250 / 0.35);
-  cursor: pointer;
-  transition: border-color 0.15s ease, background-color 0.15s ease;
-  border-radius: 1px;
-  padding-bottom: 0.5px;
-}
-
-mark.quote-highlight:hover {
-  border-bottom-color: oklch(0.55 0.12 250 / 0.7);
-  background-color: oklch(0.55 0.12 250 / 0.06);
-}
-
-mark.quote-highlight-active {
-  background-color: oklch(0.55 0.12 250 / 0.1);
-  border-bottom-color: oklch(0.55 0.12 250 / 0.6);
-}
-
-.dark mark.quote-highlight {
-  border-bottom-color: oklch(0.7 0.12 250 / 0.35);
-}
-
-.dark mark.quote-highlight:hover {
-  border-bottom-color: oklch(0.7 0.12 250 / 0.7);
-  background-color: oklch(0.7 0.12 250 / 0.08);
-}
-
-.dark mark.quote-highlight-active {
-  background-color: oklch(0.7 0.12 250 / 0.12);
-  border-bottom-color: oklch(0.7 0.12 250 / 0.6);
-}
-
 .ProseMirror {
   outline: none;
 }

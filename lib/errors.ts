@@ -16,7 +16,7 @@ export type Surface =
   | "vote"
   | "document"
   | "suggestions"
-  | "activate_gateway";
+;
 
 export type ErrorCode = `${ErrorType}:${Surface}`;
 
@@ -32,7 +32,6 @@ export const visibilityBySurface: Record<Surface, ErrorVisibility> = {
   vote: "response",
   document: "response",
   suggestions: "response",
-  activate_gateway: "response",
 };
 
 export class ChatbotError extends Error {
@@ -83,9 +82,6 @@ export function getMessageByErrorCode(errorCode: ErrorCode): string {
   switch (errorCode) {
     case "bad_request:api":
       return "The request couldn't be processed. Please check your input and try again.";
-
-    case "bad_request:activate_gateway":
-      return "AI Gateway requires activation. Please configure your AI provider API key in settings.";
 
     case "unauthorized:auth":
       return "You need to sign in before continuing.";

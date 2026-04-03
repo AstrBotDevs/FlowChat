@@ -29,12 +29,14 @@ import {
   suggestion,
   type User,
   user,
+  type UserProvider,
+  userProvider,
   vote,
 } from "./schema";
 import { generateHashedPassword } from "./utils";
 
-const client = process.env.POSTGRES_URL ? postgres(process.env.POSTGRES_URL) : null;
-const db = client ? drizzle(client) : null!;
+const client = postgres(process.env.POSTGRES_URL ?? "");
+const db = drizzle(client);
 
 export async function getUser(email: string): Promise<User[]> {
   try {
@@ -627,6 +629,118 @@ export async function getStreamIdsByChatId({ chatId }: { chatId: string }) {
     throw new ChatbotError(
       "bad_request:database",
       "Failed to get stream ids by chat id"
+    );
+  }
+}
+
+export async function getUserProviders({
+  userId,
+}: {
+  userId: string;
+}): Promise<UserProvider[]> {
+  try {
+    return await db
+      .select()
+      .from(userProvider)
+      .where(eq(userProvider.userId, userId))
+      .orderBy(asc(userProvider.createdAt));
+  } catch (_error) {
+    throw new ChatbotError(
+      "bad_request:database",
+      "Failed to get user providers"
+    );
+  }
+}
+
+export async function getUserProviderByProviderId({
+  userId,
+  providerId,
+}: {
+  userId: string;
+  providerId: string;
+}): Promise<UserProvider | null> {
+  try {
+    const [result] = await db
+      .select()
+      .from(userProvider)
+      .where(
+        and(
+          eq(userProvider.userId, userId),
+          eq(userProvider.providerId, providerId)
+        )
+      );
+    return result ?? null;
+  } catch (_error) {
+    throw new ChatbotError(
+      "bad_request:database",
+      "Failed to get user provider"
+    );
+  }
+}
+
+export async function upsertUserProvider({
+  userId,
+  providerId,
+  apiKey,
+  baseUrl,
+  providerType,
+}: {
+  userId: string;
+  providerId: string;
+  apiKey: string;
+  baseUrl: string | null;
+  providerType: "openai-compatible" | "anthropic" | "google";
+}) {
+  try {
+    return await db
+      .insert(userProvider)
+      .values({
+        userId,
+        providerId,
+        apiKey,
+        baseUrl,
+        providerType,
+        updatedAt: new Date(),
+      })
+      .onConflictDoUpdate({
+        target: [userProvider.userId, userProvider.providerId],
+        set: {
+          apiKey,
+          baseUrl,
+          providerType,
+          updatedAt: new Date(),
+        },
+      })
+      .returning();
+  } catch (_error) {
+    throw new ChatbotError(
+      "bad_request:database",
+      "Failed to upsert user provider"
+    );
+  }
+}
+
+export async function deleteUserProvider({
+  userId,
+  providerId,
+}: {
+  userId: string;
+  providerId: string;
+}) {
+  try {
+    return await db
+      .delete(userProvider)
+      .where(
+        and(
+          eq(userProvider.userId, userId),
+          eq(userProvider.providerId, providerId)
+        )
+      )
+      .returning();
+  } catch (_error) {
+    throw new ChatbotError(
+      "bad_request:database",
+      "Failed to delete user provider"
     );
   }
 }

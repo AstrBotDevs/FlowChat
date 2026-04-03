@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 import { getToken } from "next-auth/jwt";
 import { signIn } from "@/app/(auth)/auth";
 import { isDevelopmentEnvironment } from "@/lib/constants";
-import { isMockMode } from "@/lib/mock/index";
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -11,12 +10,6 @@ export async function GET(request: Request) {
     rawRedirect.startsWith("/") && !rawRedirect.startsWith("//")
       ? rawRedirect
       : "/";
-
-  if (isMockMode) {
-    // In mock mode, skip auth entirely and redirect to the target
-    const base = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
-    return NextResponse.redirect(new URL(`${base}${redirectUrl}`, request.url));
-  }
 
   const token = await getToken({
     req: request,

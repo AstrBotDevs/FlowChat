@@ -1,16 +1,6 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
 import { useActiveChat } from "@/hooks/use-active-chat";
 import {
   initialArtifactData,
@@ -44,8 +34,6 @@ export function ChatShell() {
     votes,
     currentModelId,
     setCurrentModelId,
-    showCreditCardAlert,
-    setShowCreditCardAlert,
   } = useActiveChat();
 
   const [editingMessage, setEditingMessage] = useState<ChatMessage | null>(
@@ -170,32 +158,6 @@ export function ChatShell() {
       </div>
 
       <DataStreamHandler />
-
-      <AlertDialog
-        onOpenChange={setShowCreditCardAlert}
-        open={showCreditCardAlert}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Activate AI Gateway</AlertDialogTitle>
-            <AlertDialogDescription>
-              This application requires{" "}
-              {process.env.NODE_ENV === "production" ? "the owner" : "you"} to
-              configure an AI provider API key.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => {
-                window.location.href = `${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/`;
-              }}
-            >
-              Activate
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </>
   );
 }

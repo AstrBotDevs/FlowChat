@@ -4,6 +4,7 @@ import {
   MessageSquareIcon,
   PanelLeftIcon,
   PenSquareIcon,
+  SettingsIcon,
   TrashIcon,
 } from "lucide-react";
 import Link from "next/link";
@@ -135,6 +136,23 @@ export function AppSidebar({ user }: { user: User | undefined }) {
           <SidebarHistory user={user} />
         </SidebarContent>
         <SidebarFooter className="border-t border-sidebar-border pt-2 pb-3">
+          <SidebarMenu>
+            <SidebarMenuItem>
+              <SidebarMenuButton
+                asChild
+                className="rounded-lg text-sidebar-foreground/60 transition-colors duration-150 hover:text-sidebar-foreground"
+                tooltip="Settings"
+              >
+                <Link
+                  href="/settings"
+                  onClick={() => setOpenMobile(false)}
+                >
+                  <SettingsIcon className="size-4" />
+                  <span className="text-[13px]">Settings</span>
+                </Link>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          </SidebarMenu>
           {user && <SidebarUserNav user={user} />}
         </SidebarFooter>
         <SidebarRail />

@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import { Toaster } from "sonner";
 import { ThemeProvider } from "@/components/theme-provider";
 import { TooltipProvider } from "@/components/ui/tooltip";
 
@@ -7,9 +8,11 @@ import "./globals.css";
 import { SessionProvider } from "next-auth/react";
 
 export const metadata: Metadata = {
-  metadataBase: new URL("https://localhost:3000"),
-  title: "AI Learning Assistant",
-  description: "Multi-dimensional AI conversation system with deep-dive and branching.",
+  metadataBase: new URL(
+    process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000",
+  ),
+  title: "Chatbot",
+  description: "An open-source AI chatbot built with Next.js and the AI SDK.",
 };
 
 export const viewport = {
@@ -77,7 +80,17 @@ export default function RootLayout({
           <SessionProvider
             basePath={`${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/api/auth`}
           >
-            <TooltipProvider>{children}</TooltipProvider>
+            <TooltipProvider>
+              <Toaster
+                position="top-center"
+                theme="system"
+                toastOptions={{
+                  className:
+                    "!bg-card !text-foreground !border-border/50 !shadow-[var(--shadow-float)]",
+                }}
+              />
+              {children}
+            </TooltipProvider>
           </SessionProvider>
         </ThemeProvider>
       </body>

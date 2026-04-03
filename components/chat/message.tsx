@@ -1,11 +1,8 @@
 "use client";
-import { useState, useCallback, useRef } from "react";
 import type { UseChatHelpers } from "@ai-sdk/react";
-import useSWR from "swr";
 import type { Vote } from "@/lib/db/schema";
 import type { ChatMessage } from "@/lib/types";
-import { useQuoteHighlighter } from "@/hooks/use-quote-highlighter";
-import { cn, fetcher, sanitizeText } from "@/lib/utils";
+import { cn, sanitizeText } from "@/lib/utils";
 import { MessageContent, MessageResponse } from "../ai-elements/message";
 import { Shimmer } from "../ai-elements/shimmer";
 import {
@@ -19,31 +16,10 @@ import { useDataStream } from "./data-stream-provider";
 import { DocumentToolResult } from "./document";
 import { DocumentPreview } from "./document-preview";
 import { SparklesIcon } from "./icons";
-import { InlineDrillCard } from "./inline-drill-card";
 import { MessageActions } from "./message-actions";
 import { MessageReasoning } from "./message-reasoning";
 import { PreviewAttachment } from "./preview-attachment";
-import { TextSelectionPopover } from "./text-selection-popover";
 import { Weather } from "./weather";
-
-// ── Types ──────────────────────────────────────────────
-
-interface ActiveDrill {
-  quoteText: string;
-  quoteId?: string;
-  existingThreadId?: string;
-  anchorRect?: { top: number; left: number; width: number; bottom: number };
-}
-
-interface QuoteMarker {
-  id: string;
-  quoteText: string;
-  childThreadId: string;
-}
-
-// ── Main Component ─────────────────────────────────────
-
-const basePath = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 
 const PurePreviewMessage = ({
   addToolApprovalResponse,
@@ -68,7 +44,6 @@ const PurePreviewMessage = ({
   requiresScrollPadding: boolean;
   onEdit?: (message: ChatMessage) => void;
 }) => {
-  const [activeDrill, setActiveDrill] = useState<ActiveDrill | null>(null);
   const attachmentsFromMessage = message.parts.filter(
     (part) => part.type === "file"
   );
@@ -77,49 +52,6 @@ const PurePreviewMessage = ({
 
   const isUser = message.role === "user";
   const isAssistant = message.role === "assistant";
-
-  // Fetch existing quote markers for this message
-  const { data: quotesData, mutate: mutateQuotes } = useSWR<{ quotes: QuoteMarker[] }>(
-    isAssistant && !isLoading
-      ? `${basePath}/api/quotes?messageId=${message.id}`
-      : null,
-    fetcher,
-    { revalidateOnFocus: false }
-  );
-
-  const quoteMarkers = quotesData?.quotes ?? [];
-
-  // Use a ref-based callback to break the circular dependency
-  // (hook needs handleQuoteClick, handleQuoteClick needs hook's getMarkElement)
-  const drillOpenerRef = useRef<(quote: QuoteMarker) => void>(() => {});
-
-  // Inline text highlighting on the rendered markdown
-  const { containerRef, setActiveQuote, getMarkElement } = useQuoteHighlighter(
-    quoteMarkers,
-    useCallback((quote: QuoteMarker) => drillOpenerRef.current(quote), [])
-  );
-
-  // Keep the ref in sync
-  drillOpenerRef.current = (quote: QuoteMarker) => {
-    const mark = getMarkElement(quote.id);
-    const rect = mark?.getBoundingClientRect();
-    setActiveDrill({
-      quoteText: quote.quoteText,
-      quoteId: quote.id,
-      existingThreadId: quote.childThreadId,
-      anchorRect: rect
-        ? { top: rect.top, left: rect.left, width: rect.width, bottom: rect.bottom }
-        : undefined,
-    });
-    setActiveQuote(quote.id);
-  };
-
-  // When a new drill closes, refetch quotes to show the new marker
-  const handleDrillClose = () => {
-    setActiveDrill(null);
-    setActiveQuote(null);
-    mutateQuotes();
-  };
 
   const hasAnyContent = message.parts?.some(
     (part) =>
@@ -419,39 +351,7 @@ const PurePreviewMessage = ({
           </div>
         )}
         {isAssistant ? (
-          <div className="flex min-w-0 flex-1 flex-col gap-2">
-            <TextSelectionPopover
-              onDrillStart={(quoteText) => {
-                // Get position from the current text selection
-                const sel = window.getSelection();
-                let rect: DOMRect | undefined;
-                if (sel && !sel.isCollapsed) {
-                  rect = sel.getRangeAt(0).getBoundingClientRect();
-                }
-                setActiveDrill({
-                  quoteText,
-                  anchorRect: rect
-                    ? { top: rect.top, left: rect.left, width: rect.width, bottom: rect.bottom }
-                    : undefined,
-                });
-              }}
-            >
-              <div ref={containerRef}>
-                {content}
-              </div>
-            </TextSelectionPopover>
-
-            {/* Active drill card */}
-            {activeDrill && (
-              <InlineDrillCard
-                anchorRect={activeDrill.anchorRect}
-                existingThreadId={activeDrill.existingThreadId}
-                initialQuoteText={activeDrill.quoteText}
-                onClose={handleDrillClose}
-                sourceMessageId={message.id}
-              />
-            )}
-          </div>
+          <div className="flex min-w-0 flex-1 flex-col gap-2">{content}</div>
         ) : (
           content
         )}

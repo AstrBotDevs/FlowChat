@@ -7,6 +7,7 @@ import {
   primaryKey,
   text,
   timestamp,
+  unique,
   uuid,
   varchar,
 } from "drizzle-orm/pg-core";
@@ -134,3 +135,28 @@ export const stream = pgTable(
 );
 
 export type Stream = InferSelectModel<typeof stream>;
+
+export const userProvider = pgTable(
+  "UserProvider",
+  {
+    id: uuid("id").primaryKey().notNull().defaultRandom(),
+    userId: uuid("userId")
+      .notNull()
+      .references(() => user.id),
+    providerId: varchar("providerId", { length: 64 }).notNull(),
+    apiKey: text("apiKey").notNull(),
+    baseUrl: text("baseUrl"),
+    providerType: varchar("providerType", {
+      enum: ["openai-compatible", "anthropic", "google"],
+    })
+      .notNull()
+      .default("openai-compatible"),
+    createdAt: timestamp("createdAt").notNull().defaultNow(),
+    updatedAt: timestamp("updatedAt").notNull().defaultNow(),
+  },
+  (table) => ({
+    userProviderUnique: unique().on(table.userId, table.providerId),
+  })
+);
+
+export type UserProvider = InferSelectModel<typeof userProvider>;

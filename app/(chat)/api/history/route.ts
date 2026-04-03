@@ -2,8 +2,6 @@ import type { NextRequest } from "next/server";
 import { auth } from "@/app/(auth)/auth";
 import { deleteAllChatsByUserId, getChatsByUserId } from "@/lib/db/queries";
 import { ChatbotError } from "@/lib/errors";
-import { isMockMode, MOCK_USER_ID } from "@/lib/mock/index";
-import { mockStore } from "@/lib/mock/store";
 
 export async function GET(request: NextRequest) {
   const { searchParams } = request.nextUrl;
@@ -20,11 +18,6 @@ export async function GET(request: NextRequest) {
       "bad_request:api",
       "Only one of starting_after or ending_before can be provided."
     ).toResponse();
-  }
-
-  if (isMockMode) {
-    const chats = mockStore.getChatsByUserId(MOCK_USER_ID);
-    return Response.json({ chats, hasMore: false });
   }
 
   const session = await auth();
@@ -44,10 +37,6 @@ export async function GET(request: NextRequest) {
 }
 
 export async function DELETE() {
-  if (isMockMode) {
-    return Response.json({ deletedCount: 0 }, { status: 200 });
-  }
-
   const session = await auth();
 
   if (!session?.user) {

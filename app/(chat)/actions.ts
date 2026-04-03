@@ -4,7 +4,6 @@ import { generateText, type UIMessage } from "ai";
 import { cookies } from "next/headers";
 import { auth } from "@/app/(auth)/auth";
 import type { VisibilityType } from "@/components/chat/visibility-selector";
-import { titleModel } from "@/lib/ai/models";
 import { titlePrompt } from "@/lib/ai/prompts";
 import { getTitleModel } from "@/lib/ai/providers";
 import {
@@ -22,16 +21,18 @@ export async function saveChatModelAsCookie(model: string) {
 
 export async function generateTitleFromUserMessage({
   message,
+  userId,
+  modelId,
 }: {
   message: UIMessage;
+  userId: string;
+  modelId: string;
 }) {
+  const model = await getTitleModel(modelId, userId);
   const { text } = await generateText({
-    model: getTitleModel(),
+    model,
     system: titlePrompt,
     prompt: getTextFromMessage(message),
-    providerOptions: {
-      gateway: { order: titleModel.gatewayOrder },
-    },
   });
   return text
     .replace(/^[#*"\s]+/, "")

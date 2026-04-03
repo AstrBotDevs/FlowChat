@@ -7,9 +7,11 @@ import {
   ArrowUpIcon,
   BrainIcon,
   EyeIcon,
+  KeyIcon,
   LockIcon,
   WrenchIcon,
 } from "lucide-react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
 import {
@@ -38,10 +40,10 @@ import {
 } from "@/components/ai-elements/model-selector";
 import {
   type ChatModel,
-  chatModels,
   DEFAULT_CHAT_MODEL,
   type ModelCapabilities,
 } from "@/lib/ai/models";
+import { KNOWN_PROVIDERS } from "@/lib/ai/provider-registry";
 import type { Attachment, ChatMessage } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import {
@@ -111,6 +113,18 @@ function PureMultimodalInput({
   const { setTheme, resolvedTheme } = useTheme();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const { width } = useWindowSize();
+
+  const { data: modelsData } = useSWR(
+    `${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/api/models`,
+    (url: string) => fetch(url).then((r) => r.json()),
+    { revalidateOnFocus: false, dedupingInterval: 3_600_000 }
+  );
+  const { data: providersData } = useSWR(
+    `${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/api/providers`,
+    (url: string) => fetch(url).then((r) => r.json()),
+    { revalidateOnFocus: true, dedupingInterval: 30_000 }
+  );
+  const hasConfiguredProviders = (providersData?.length ?? 0) > 0;
   const hasAutoFocused = useRef(false);
   useEffect(() => {
     if (!hasAutoFocused.current && width) {
@@ -418,6 +432,21 @@ function PureMultimodalInput({
         )}
       </div>
 
+      {modelsData && !hasConfiguredProviders && (
+        <div className="flex items-center gap-2.5 rounded-xl border border-border/40 bg-card/60 px-4 py-3 text-[13px] text-muted-foreground">
+          <KeyIcon className="size-4 shrink-0" />
+          <span>
+            Please configure an API Key first.{" "}
+            <Link
+              className="font-medium text-foreground underline underline-offset-4 hover:no-underline"
+              href="/settings"
+            >
+              Go to Settings
+            </Link>
+          </span>
+        </div>
+      )}
+
       <PromptInput
         className="[&>div]:rounded-2xl [&>div]:border [&>div]:border-border/30 [&>div]:bg-card/70 [&>div]:shadow-[var(--shadow-composer)] [&>div]:transition-shadow [&>div]:duration-300 [&>div]:focus-within:shadow-[var(--shadow-composer-focus)]"
         onSubmit={() => {
@@ -539,7 +568,7 @@ function PureMultimodalInput({
                   : "bg-muted text-muted-foreground/25 cursor-not-allowed"
               )}
               data-testid="send-button"
-              disabled={!input.trim() || uploadQueue.length > 0}
+              disabled={!input.trim() || uploadQueue.length > 0 || !hasConfiguredProviders}
               status={status}
               variant="secondary"
             >
@@ -600,7 +629,7 @@ function PureAttachmentsButton({
   );
 
   const caps: Record<string, ModelCapabilities> | undefined =
-    modelsResponse?.capabilities ?? modelsResponse;
+    modelsResponse?.capabilities;
   const hasVision = caps?.[selectedModelId]?.vision ?? false;
 
   return (
@@ -634,22 +663,102 @@ function PureModelSelectorCompact({
   onModelChange?: (modelId: string) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [showMore, setShowMore] = useState(false);
   const { data: modelsData } = useSWR(
     `${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/api/models`,
     (url: string) => fetch(url).then((r) => r.json()),
     { revalidateOnFocus: false, dedupingInterval: 3_600_000 }
   );
+  const { data: providersData } = useSWR(
+    `${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/api/providers`,
+    (url: string) => fetch(url).then((r) => r.json()),
+    { revalidateOnFocus: true, dedupingInterval: 30_000 }
+  );
 
   const capabilities: Record<string, ModelCapabilities> | undefined =
-    modelsData?.capabilities ?? modelsData;
-  const dynamicModels: ChatModel[] | undefined = modelsData?.models;
-  const activeModels = dynamicModels ?? chatModels;
+    modelsData?.capabilities;
+  const allModels: ChatModel[] = modelsData?.models ?? [];
+  const configuredProviders: string[] = (providersData ?? []).map(
+    (p: { providerId: string }) => p.providerId
+  );
+  const configuredSet = new Set(configuredProviders);
 
   const selectedModel =
-    activeModels.find((m: ChatModel) => m.id === selectedModelId) ??
-    activeModels.find((m: ChatModel) => m.id === DEFAULT_CHAT_MODEL) ??
-    activeModels[0];
-  const [provider] = selectedModel.id.split("/");
+    allModels.find((m) => m.id === selectedModelId) ??
+    allModels.find((m) => m.id === DEFAULT_CHAT_MODEL) ??
+    allModels[0];
+
+  const displayName = selectedModel?.name ?? selectedModelId.split("/").pop();
+  const [provider] = (selectedModel?.id ?? selectedModelId).split("/");
+
+  const availableModels = allModels.filter((m) =>
+    configuredSet.has(m.provider)
+  );
+  const unavailableModels = allModels.filter(
+    (m) => !configuredSet.has(m.provider)
+  );
+
+  const groupByProvider = (models: ChatModel[]) => {
+    const grouped: Record<string, ChatModel[]> = {};
+    for (const model of models) {
+      if (!grouped[model.provider]) {
+        grouped[model.provider] = [];
+      }
+      grouped[model.provider].push(model);
+    }
+    return Object.entries(grouped).sort(([a], [b]) => a.localeCompare(b));
+  };
+
+  const renderModelItem = (model: ChatModel, available: boolean) => {
+    const logoProvider = model.id.split("/")[0];
+    return (
+      <ModelSelectorItem
+        className={cn(
+          "flex w-full",
+          model.id === selectedModel?.id &&
+            "border-b border-dashed border-foreground/50",
+          !available && "opacity-40 cursor-default"
+        )}
+        key={model.id}
+        onSelect={() => {
+          if (!available) {
+            toast(
+              `Please configure ${KNOWN_PROVIDERS[model.provider]?.name ?? model.provider} API Key in Settings first`
+            );
+            return;
+          }
+          onModelChange?.(model.id);
+          setCookie("chat-model", model.id);
+          setOpen(false);
+          setTimeout(() => {
+            document
+              .querySelector<HTMLTextAreaElement>(
+                "[data-testid='multimodal-input']"
+              )
+              ?.focus();
+          }, 50);
+        }}
+        value={model.id}
+      >
+        <ModelSelectorLogo provider={logoProvider} />
+        <ModelSelectorName>{model.name}</ModelSelectorName>
+        <div className="ml-auto flex items-center gap-2 text-foreground/70">
+          {capabilities?.[model.id]?.tools && (
+            <WrenchIcon className="size-3.5" />
+          )}
+          {capabilities?.[model.id]?.vision && (
+            <EyeIcon className="size-3.5" />
+          )}
+          {capabilities?.[model.id]?.reasoning && (
+            <BrainIcon className="size-3.5" />
+          )}
+          {!available && (
+            <LockIcon className="size-3 text-muted-foreground/50" />
+          )}
+        </div>
+      </ModelSelectorItem>
+    );
+  };
 
   return (
     <ModelSelector onOpenChange={setOpen} open={open}>
@@ -660,129 +769,56 @@ function PureModelSelectorCompact({
           variant="ghost"
         >
           {provider && <ModelSelectorLogo provider={provider} />}
-          <ModelSelectorName>{selectedModel.name}</ModelSelectorName>
+          <ModelSelectorName>{displayName}</ModelSelectorName>
         </Button>
       </ModelSelectorTrigger>
       <ModelSelectorContent>
         <ModelSelectorInput placeholder="Search models..." />
         <ModelSelectorList>
-          {(() => {
-            const curatedIds = new Set(chatModels.map((m) => m.id));
-            const allModels = dynamicModels
-              ? [
-                  ...chatModels,
-                  ...dynamicModels.filter((m) => !curatedIds.has(m.id)),
-                ]
-              : chatModels;
-
-            const grouped: Record<
-              string,
-              { model: ChatModel; curated: boolean }[]
-            > = {};
-            for (const model of allModels) {
-              const key = curatedIds.has(model.id)
-                ? "_available"
-                : model.provider;
-              if (!grouped[key]) {
-                grouped[key] = [];
-              }
-              grouped[key].push({ model, curated: curatedIds.has(model.id) });
-            }
-
-            const sortedKeys = Object.keys(grouped).sort((a, b) => {
-              if (a === "_available") {
-                return -1;
-              }
-              if (b === "_available") {
-                return 1;
-              }
-              return a.localeCompare(b);
-            });
-
-            const providerNames: Record<string, string> = {
-              alibaba: "Alibaba",
-              anthropic: "Anthropic",
-              "arcee-ai": "Arcee AI",
-              bytedance: "ByteDance",
-              cohere: "Cohere",
-              deepseek: "DeepSeek",
-              google: "Google",
-              inception: "Inception",
-              kwaipilot: "Kwaipilot",
-              meituan: "Meituan",
-              meta: "Meta",
-              minimax: "MiniMax",
-              mistral: "Mistral",
-              moonshotai: "Moonshot",
-              morph: "Morph",
-              nvidia: "Nvidia",
-              openai: "OpenAI",
-              perplexity: "Perplexity",
-              "prime-intellect": "Prime Intellect",
-              xiaomi: "Xiaomi",
-              xai: "xAI",
-              zai: "Zai",
-            };
-
-            return sortedKeys.map((key) => (
-              <ModelSelectorGroup
-                heading={
-                  key === "_available"
-                    ? "Available"
-                    : (providerNames[key] ?? key)
-                }
-                key={key}
-              >
-                {grouped[key].map(({ model, curated }) => {
-                  const logoProvider = model.id.split("/")[0];
-                  return (
-                    <ModelSelectorItem
-                      className={cn(
-                        "flex w-full",
-                        model.id === selectedModel.id &&
-                          "border-b border-dashed border-foreground/50",
-                        !curated && "opacity-40 cursor-default"
-                      )}
-                      key={model.id}
-                      onSelect={() => {
-                        if (!curated) {
-                          return;
-                        }
-                        onModelChange?.(model.id);
-                        setCookie("chat-model", model.id);
-                        setOpen(false);
-                        setTimeout(() => {
-                          document
-                            .querySelector<HTMLTextAreaElement>(
-                              "[data-testid='multimodal-input']"
-                            )
-                            ?.focus();
-                        }, 50);
-                      }}
-                      value={model.id}
-                    >
-                      <ModelSelectorLogo provider={logoProvider} />
-                      <ModelSelectorName>{model.name}</ModelSelectorName>
-                      <div className="ml-auto flex items-center gap-2 text-foreground/70">
-                        {capabilities?.[model.id]?.tools && (
-                          <WrenchIcon className="size-3.5" />
-                        )}
-                        {capabilities?.[model.id]?.vision && (
-                          <EyeIcon className="size-3.5" />
-                        )}
-                        {capabilities?.[model.id]?.reasoning && (
-                          <BrainIcon className="size-3.5" />
-                        )}
-                        {!curated && (
-                          <LockIcon className="size-3 text-muted-foreground/50" />
-                        )}
-                      </div>
-                    </ModelSelectorItem>
-                  );
-                })}
+          {availableModels.length > 0
+            ? groupByProvider(availableModels).map(([prov, models]) => (
+                <ModelSelectorGroup
+                  heading={KNOWN_PROVIDERS[prov]?.name ?? prov}
+                  key={prov}
+                >
+                  {models.map((m) => renderModelItem(m, true))}
+                </ModelSelectorGroup>
+              ))
+            : (
+              <ModelSelectorGroup heading="No providers configured">
+                <div className="px-3 py-2 text-[12px] text-muted-foreground">
+                  Go to Settings to add an API key
+                </div>
               </ModelSelectorGroup>
-            ));
-          })()}
+            )}
+
+          {unavailableModels.length > 0 && (
+            <ModelSelectorGroup
+              heading={
+                <button
+                  className="flex w-full items-center gap-1 text-[11px] text-muted-foreground/60 hover:text-muted-foreground"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setShowMore(!showMore);
+                  }}
+                  type="button"
+                >
+                  {showMore ? "Hide" : "Show"} more models ({unavailableModels.length})
+                </button>
+              }
+            >
+              {showMore &&
+                groupByProvider(unavailableModels).map(([prov, models]) => (
+                  <ModelSelectorGroup
+                    heading={KNOWN_PROVIDERS[prov]?.name ?? prov}
+                    key={`more-${prov}`}
+                  >
+                    {models.map((m) => renderModelItem(m, false))}
+                  </ModelSelectorGroup>
+                ))}
+            </ModelSelectorGroup>
+          )}
         </ModelSelectorList>
       </ModelSelectorContent>
     </ModelSelector>
