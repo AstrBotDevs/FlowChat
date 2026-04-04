@@ -1,6 +1,7 @@
 # Flow Chat
 
-一个以“理解、追问、连续阅读”为核心的 Chatbot 系统。
+一个以“理解、追问、连续阅读”为核心的沉浸式 AI Chatbot。
+An immersive AI Chatbot focused on in-place follow-up questions and continuous reading.
 
 ## 🎯 目标产品形态
 
