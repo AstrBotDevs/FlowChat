@@ -35,7 +35,7 @@ function PureMessages({
   isReadonly,
   isArtifactVisible,
   isLoading,
-  selectedModelId: _selectedModelId,
+  selectedModelId,
   onEditMessage,
 }: MessagesProps) {
   const {
@@ -90,6 +90,7 @@ function PureMessages({
               requiresScrollPadding={
                 hasSentMessage && index === messages.length - 1
               }
+              selectedChatModel={selectedModelId}
               setMessages={setMessages}
               vote={
                 votes

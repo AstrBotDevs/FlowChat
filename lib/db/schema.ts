@@ -40,7 +40,7 @@ export const chat = pgTable("Chat", {
 
 export type Chat = InferSelectModel<typeof chat>;
 
-export const message = pgTable("Message_v2", {
+export const message = pgTable("Message", {
   id: uuid("id").primaryKey().notNull().defaultRandom(),
   chatId: uuid("chatId")
     .notNull()
@@ -54,7 +54,7 @@ export const message = pgTable("Message_v2", {
 export type DBMessage = InferSelectModel<typeof message>;
 
 export const vote = pgTable(
-  "Vote_v2",
+  "Vote",
   {
     chatId: uuid("chatId")
       .notNull()
@@ -160,3 +160,12 @@ export const userProvider = pgTable(
 );
 
 export type UserProvider = InferSelectModel<typeof userProvider>;
+
+export {
+  thread,
+  quote,
+  threadMessage,
+  type Thread,
+  type Quote,
+  type ThreadMessage,
+} from "./schema-thread";

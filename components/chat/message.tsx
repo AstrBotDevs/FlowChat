@@ -1,8 +1,12 @@
 "use client";
 import type { UseChatHelpers } from "@ai-sdk/react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import useSWR from "swr";
 import type { Vote } from "@/lib/db/schema";
 import type { ChatMessage } from "@/lib/types";
-import { cn, sanitizeText } from "@/lib/utils";
+import { cn, fetcher, generateUUID, sanitizeText } from "@/lib/utils";
+import { useTextSelection } from "@/hooks/use-text-selection";
 import { MessageContent, MessageResponse } from "../ai-elements/message";
 import { Shimmer } from "../ai-elements/shimmer";
 import {
@@ -12,14 +16,207 @@ import {
   ToolInput,
   ToolOutput,
 } from "../ai-elements/tool";
+import { AnchorIndex, type AnchorIndexItem } from "./anchor-index";
 import { useDataStream } from "./data-stream-provider";
 import { DocumentToolResult } from "./document";
 import { DocumentPreview } from "./document-preview";
+import { FollowUpButton } from "./follow-up-button";
+import { FollowUpPopover } from "./follow-up-popover";
 import { SparklesIcon } from "./icons";
 import { MessageActions } from "./message-actions";
 import { MessageReasoning } from "./message-reasoning";
 import { PreviewAttachment } from "./preview-attachment";
 import { Weather } from "./weather";
+
+type QuoteWithRounds = {
+  id: string;
+  sourceThreadId: string;
+  sourceMessageId: string;
+  quoteText: string;
+  childThreadId: string;
+  isUnlinked: boolean;
+  createdAt: string;
+  roundCount: number;
+};
+
+type ActivePopoverState = {
+  quoteText: string;
+  sourceMessageId: string;
+  sourceThreadId: string | null;
+  existingThreadId?: string;
+  anchorId: string;
+} | null;
+
+function AnnotatedText({
+  text,
+  quotes,
+  onAnchorClick,
+  onUnlink,
+}: {
+  text: string;
+  quotes: QuoteWithRounds[];
+  onAnchorClick: (threadId: string, quoteId: string) => void;
+  onUnlink: (quoteId: string) => void;
+}) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const callbacksRef = useRef({ onAnchorClick, onUnlink });
+  callbacksRef.current = { onAnchorClick, onUnlink };
+
+  const [contextMenu, setContextMenu] = useState<{
+    x: number;
+    y: number;
+    quoteId: string;
+  } | null>(null);
+
+  const quotesKey = quotes.map((q) => `${q.id}:${q.roundCount}`).join(",");
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container || quotes.length === 0) return;
+
+    for (const existing of container.querySelectorAll("[data-anchor-quote-id]")) {
+      const parent = existing.parentNode;
+      if (parent) {
+        while (existing.firstChild) parent.insertBefore(existing.firstChild, existing);
+        parent.removeChild(existing);
+      }
+    }
+
+    const treeWalker = document.createTreeWalker(
+      container,
+      NodeFilter.SHOW_TEXT
+    );
+    const textNodes: Text[] = [];
+    let node: Node | null;
+    while ((node = treeWalker.nextNode())) {
+      textNodes.push(node as Text);
+    }
+
+    const fullText = textNodes.map((n) => n.textContent ?? "").join("");
+
+    for (const q of quotes) {
+      const searchIdx = fullText.indexOf(q.quoteText);
+      if (searchIdx === -1) continue;
+
+      const freshWalker = document.createTreeWalker(
+        container,
+        NodeFilter.SHOW_TEXT
+      );
+      const freshNodes: Text[] = [];
+      let fn: Node | null;
+      while ((fn = freshWalker.nextNode())) {
+        freshNodes.push(fn as Text);
+      }
+      const freshFull = freshNodes.map((n) => n.textContent ?? "").join("");
+      const freshIdx = freshFull.indexOf(q.quoteText);
+      if (freshIdx === -1) continue;
+
+      let charOffset = 0;
+      const range = document.createRange();
+      let startSet = false;
+
+      for (const tn of freshNodes) {
+        const len = tn.textContent?.length ?? 0;
+        const nodeStart = charOffset;
+        const nodeEnd = charOffset + len;
+
+        if (!startSet && freshIdx < nodeEnd) {
+          range.setStart(tn, freshIdx - nodeStart);
+          startSet = true;
+        }
+
+        const endIdx = freshIdx + q.quoteText.length;
+        if (startSet && endIdx <= nodeEnd) {
+          range.setEnd(tn, endIdx - nodeStart);
+          break;
+        }
+
+        charOffset = nodeEnd;
+      }
+
+      if (!startSet) continue;
+
+      const wrapper = document.createElement("span");
+      wrapper.setAttribute("data-anchor-quote-id", q.id);
+      wrapper.setAttribute("data-anchor-thread-id", q.childThreadId);
+      wrapper.className =
+        "cursor-pointer underline decoration-primary/40 decoration-dotted underline-offset-4 transition-all hover:decoration-primary hover:decoration-solid";
+
+      try {
+        range.surroundContents(wrapper);
+      } catch {
+        continue;
+      }
+
+      if (q.roundCount > 0) {
+        const badge = document.createElement("sup");
+        badge.className =
+          "ml-0.5 inline-flex size-4 items-center justify-center rounded-full bg-primary/10 text-[9px] font-semibold text-primary";
+        badge.textContent = String(q.roundCount);
+        wrapper.appendChild(badge);
+      }
+    }
+
+    const handleClick = (e: Event) => {
+      const target = (e.target as HTMLElement).closest("[data-anchor-quote-id]");
+      if (!target) return;
+      const qid = target.getAttribute("data-anchor-quote-id") ?? "";
+      const tid = target.getAttribute("data-anchor-thread-id") ?? "";
+      callbacksRef.current.onAnchorClick(tid, qid);
+    };
+
+    const handleCtx = (e: Event) => {
+      const target = (e.target as HTMLElement).closest("[data-anchor-quote-id]");
+      if (!target) return;
+      e.preventDefault();
+      const qid = target.getAttribute("data-anchor-quote-id") ?? "";
+      const me = e as MouseEvent;
+      setContextMenu({ x: me.clientX, y: me.clientY, quoteId: qid });
+    };
+
+    container.addEventListener("click", handleClick);
+    container.addEventListener("contextmenu", handleCtx);
+
+    return () => {
+      container.removeEventListener("click", handleClick);
+      container.removeEventListener("contextmenu", handleCtx);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [quotesKey]);
+
+  useEffect(() => {
+    if (!contextMenu) return;
+    const close = () => setContextMenu(null);
+    document.addEventListener("click", close);
+    return () => document.removeEventListener("click", close);
+  }, [contextMenu]);
+
+  return (
+    <div ref={containerRef}>
+      <MessageResponse>{text}</MessageResponse>
+
+      {contextMenu &&
+        createPortal(
+          <div
+            className="fixed z-[10000] min-w-[140px] rounded-lg border border-border/60 bg-background py-1 shadow-lg"
+            style={{ left: contextMenu.x, top: contextMenu.y }}
+          >
+            <button
+              className="w-full px-3 py-1.5 text-left text-xs text-foreground transition-colors hover:bg-muted"
+              onClick={() => {
+                callbacksRef.current.onUnlink(contextMenu.quoteId);
+                setContextMenu(null);
+              }}
+              type="button"
+            >
+              解除追问标记
+            </button>
+          </div>,
+          document.body
+        )}
+    </div>
+  );
+}
 
 const PurePreviewMessage = ({
   addToolApprovalResponse,
@@ -32,6 +229,7 @@ const PurePreviewMessage = ({
   isReadonly,
   requiresScrollPadding: _requiresScrollPadding,
   onEdit,
+  selectedChatModel,
 }: {
   addToolApprovalResponse: UseChatHelpers<ChatMessage>["addToolApprovalResponse"];
   chatId: string;
@@ -43,6 +241,7 @@ const PurePreviewMessage = ({
   isReadonly: boolean;
   requiresScrollPadding: boolean;
   onEdit?: (message: ChatMessage) => void;
+  selectedChatModel?: string;
 }) => {
   const attachmentsFromMessage = message.parts.filter(
     (part) => part.type === "file"
@@ -62,6 +261,112 @@ const PurePreviewMessage = ({
       part.type.startsWith("tool-")
   );
   const isThinking = isAssistant && isLoading && !hasAnyContent;
+
+  const textContainerRef = useRef<HTMLDivElement>(null);
+  const { selection, clearSelection } = useTextSelection(textContainerRef);
+
+  const [activePopover, setActivePopover] = useState<ActivePopoverState>(null);
+
+  const { data: quotesData, mutate: mutateQuotes } = useSWR<QuoteWithRounds[]>(
+    isAssistant && !isReadonly
+      ? `${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/api/quote?messageId=${message.id}`
+      : null,
+    fetcher,
+    { revalidateOnFocus: false }
+  );
+
+  const quotes = quotesData ?? [];
+
+  const handleFollowUp = useCallback(() => {
+    if (!selection) return;
+
+    const anchorId = `thread-anchor-${generateUUID()}`;
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount > 0) {
+      const range = sel.getRangeAt(0);
+      const anchor = document.createElement("span");
+      anchor.id = anchorId;
+      anchor.setAttribute("data-thread-anchor", "");
+      anchor.style.cssText = "position:relative;display:inline;width:0;height:0;overflow:hidden;";
+      range.collapse(false);
+      range.insertNode(anchor);
+      sel.removeAllRanges();
+    }
+
+    setActivePopover({
+      quoteText: selection.text,
+      sourceMessageId: message.id,
+      sourceThreadId: null,
+      anchorId,
+    });
+    clearSelection();
+  }, [selection, message.id, clearSelection]);
+
+  const handleAnchorClick = useCallback(
+    (threadId: string, quoteId: string) => {
+      const anchorEl = document.querySelector(`[data-anchor-quote-id="${quoteId}"]`);
+      const anchorId = `thread-anchor-${generateUUID()}`;
+
+      if (anchorEl) {
+        const span = document.createElement("span");
+        span.id = anchorId;
+        span.setAttribute("data-thread-anchor", "");
+        span.style.cssText = "position:relative;display:inline;width:0;height:0;overflow:hidden;";
+        anchorEl.after(span);
+      }
+
+      setActivePopover({
+        quoteText:
+          quotes.find((q) => q.childThreadId === threadId)?.quoteText ?? "",
+        sourceMessageId: message.id,
+        sourceThreadId: null,
+        existingThreadId: threadId,
+        anchorId,
+      });
+    },
+    [quotes, message.id]
+  );
+
+  const handleUnlink = useCallback(
+    async (quoteId: string) => {
+      await fetch(`${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/api/quote`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ quoteId }),
+      });
+      mutateQuotes();
+    },
+    [mutateQuotes]
+  );
+
+  const handleUnlinkAll = useCallback(async () => {
+    await fetch(`${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/api/quote`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ messageId: message.id }),
+    });
+    mutateQuotes();
+  }, [message.id, mutateQuotes]);
+
+  const handlePopoverClose = useCallback(
+    (hasMessages: boolean) => {
+      if (activePopover?.anchorId) {
+        document.getElementById(activePopover.anchorId)?.remove();
+      }
+      setActivePopover(null);
+      if (hasMessages) {
+        mutateQuotes();
+      }
+    },
+    [mutateQuotes, activePopover?.anchorId]
+  );
+
+  const anchorIndexItems: AnchorIndexItem[] = quotes.map((q) => ({
+    id: q.id,
+    quoteText: q.quoteText,
+    threadId: q.childThreadId,
+    roundCount: q.roundCount,
+  }));
 
   const attachments = attachmentsFromMessage.length > 0 && (
     <div
@@ -114,6 +419,9 @@ const PurePreviewMessage = ({
     }
 
     if (type === "text") {
+      const sanitized = sanitizeText(part.text);
+      const hasQuotes = isAssistant && quotes.length > 0;
+
       return (
         <MessageContent
           className={cn("text-[13px] leading-[1.65]", {
@@ -123,7 +431,16 @@ const PurePreviewMessage = ({
           data-testid="message-content"
           key={key}
         >
-          <MessageResponse>{sanitizeText(part.text)}</MessageResponse>
+          {hasQuotes ? (
+            <AnnotatedText
+              onAnchorClick={handleAnchorClick}
+              onUnlink={handleUnlink}
+              quotes={quotes}
+              text={sanitized}
+            />
+          ) : (
+            <MessageResponse>{sanitized}</MessageResponse>
+          )}
         </MessageContent>
       );
     }
@@ -315,6 +632,45 @@ const PurePreviewMessage = ({
     />
   );
 
+  const followUpOverlay = isAssistant && !isReadonly && (
+    <>
+      {selection?.isActive && (
+        <FollowUpButton
+          onFollowUp={handleFollowUp}
+          selectionRect={selection.rect}
+          visible
+        />
+      )}
+
+      {activePopover && (
+        <FollowUpPopover
+          anchorId={activePopover.anchorId}
+          chatId={chatId}
+          existingThreadId={activePopover.existingThreadId}
+          onClose={handlePopoverClose}
+          quoteText={activePopover.quoteText}
+          selectedChatModel={selectedChatModel ?? ""}
+          sourceMessageId={activePopover.sourceMessageId}
+          sourceThreadId={activePopover.sourceThreadId}
+        />
+      )}
+
+      {anchorIndexItems.length >= 2 && (
+        <AnchorIndex
+          onJump={(quoteId) => {
+            const el = document.querySelector(
+              `[data-anchor-quote-id="${quoteId}"]`
+            );
+            el?.scrollIntoView({ behavior: "smooth", block: "center" });
+          }}
+          onUnlink={handleUnlink}
+          onUnlinkAll={handleUnlinkAll}
+          quotes={anchorIndexItems}
+        />
+      )}
+    </>
+  );
+
   const content = isThinking ? (
     <div className="flex h-[calc(13px*1.65)] items-center text-[13px] leading-[1.65]">
       <Shimmer className="font-medium" duration={1}>
@@ -325,6 +681,7 @@ const PurePreviewMessage = ({
     <>
       {attachments}
       {parts}
+      {followUpOverlay}
       {actions}
     </>
   );
@@ -335,6 +692,7 @@ const PurePreviewMessage = ({
         "group/message w-full",
         !isAssistant && "animate-[fade-up_0.25s_cubic-bezier(0.22,1,0.36,1)]"
       )}
+      data-message-id={message.id}
       data-role={message.role}
       data-testid={`message-${message.role}`}
     >
@@ -351,7 +709,12 @@ const PurePreviewMessage = ({
           </div>
         )}
         {isAssistant ? (
-          <div className="flex min-w-0 flex-1 flex-col gap-2">{content}</div>
+          <div
+            className="relative flex min-w-0 flex-1 flex-col gap-2"
+            ref={textContainerRef}
+          >
+            {content}
+          </div>
         ) : (
           content
         )}

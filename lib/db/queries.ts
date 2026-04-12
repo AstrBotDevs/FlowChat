@@ -33,6 +33,7 @@ import {
   userProvider,
   vote,
 } from "./schema";
+import { deleteThreadDataByChatId } from "./queries-thread";
 import { generateHashedPassword } from "./utils";
 
 const client = postgres(process.env.POSTGRES_URL ?? "");
@@ -102,6 +103,7 @@ export async function saveChat({
 
 export async function deleteChatById({ id }: { id: string }) {
   try {
+    await deleteThreadDataByChatId({ chatId: id });
     await db.delete(vote).where(eq(vote.chatId, id));
     await db.delete(message).where(eq(message.chatId, id));
     await db.delete(stream).where(eq(stream.chatId, id));
@@ -132,6 +134,9 @@ export async function deleteAllChatsByUserId({ userId }: { userId: string }) {
 
     const chatIds = userChats.map((c) => c.id);
 
+    for (const chatId of chatIds) {
+      await deleteThreadDataByChatId({ chatId });
+    }
     await db.delete(vote).where(inArray(vote.chatId, chatIds));
     await db.delete(message).where(inArray(message.chatId, chatIds));
     await db.delete(stream).where(inArray(stream.chatId, chatIds));
