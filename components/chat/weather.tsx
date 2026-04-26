@@ -119,6 +119,10 @@ type WeatherAtLocation = {
   };
 };
 
+type WeatherError = {
+  error: string;
+};
+
 const SAMPLE = {
   latitude: 37.763_283,
   longitude: -122.412_86,
@@ -278,23 +282,46 @@ function n(num: number): number {
   return Math.ceil(num);
 }
 
+function isWeatherAtLocation(
+  weatherAtLocation: unknown
+): weatherAtLocation is WeatherAtLocation {
+  if (!weatherAtLocation || typeof weatherAtLocation !== "object") {
+    return false;
+  }
+
+  const weather = weatherAtLocation as Partial<WeatherAtLocation>;
+
+  return (
+    typeof weather.latitude === "number" &&
+    typeof weather.longitude === "number" &&
+    typeof weather.current?.time === "string" &&
+    typeof weather.current.temperature_2m === "number" &&
+    typeof weather.current_units?.temperature_2m === "string" &&
+    Array.isArray(weather.hourly?.time) &&
+    Array.isArray(weather.hourly.temperature_2m) &&
+    Array.isArray(weather.daily?.sunrise) &&
+    Array.isArray(weather.daily.sunset)
+  );
+}
+
+function getWeatherError(weatherAtLocation: unknown): string {
+  if (
+    weatherAtLocation &&
+    typeof weatherAtLocation === "object" &&
+    "error" in weatherAtLocation &&
+    typeof (weatherAtLocation as WeatherError).error === "string"
+  ) {
+    return (weatherAtLocation as WeatherError).error;
+  }
+
+  return "Weather data is unavailable for this response.";
+}
+
 export function Weather({
   weatherAtLocation = SAMPLE,
 }: {
-  weatherAtLocation?: WeatherAtLocation;
+  weatherAtLocation?: unknown;
 }) {
-  const currentHigh = Math.max(
-    ...weatherAtLocation.hourly.temperature_2m.slice(0, 24)
-  );
-  const currentLow = Math.min(
-    ...weatherAtLocation.hourly.temperature_2m.slice(0, 24)
-  );
-
-  const isDay = isWithinInterval(new Date(weatherAtLocation.current.time), {
-    start: new Date(weatherAtLocation.daily.sunrise[0]),
-    end: new Date(weatherAtLocation.daily.sunset[0]),
-  });
-
   const [isMobile, setIsMobile] = useState(false);
 
   useEffect(() => {
@@ -308,19 +335,40 @@ export function Weather({
     return () => window.removeEventListener("resize", handleResize);
   }, []);
 
+  if (!isWeatherAtLocation(weatherAtLocation)) {
+    return (
+      <div className="w-full rounded-2xl border border-destructive/20 bg-destructive/10 p-4 text-destructive text-sm">
+        {getWeatherError(weatherAtLocation)}
+      </div>
+    );
+  }
+
+  const currentHigh = Math.max(
+    ...weatherAtLocation.hourly.temperature_2m.slice(0, 24)
+  );
+  const currentLow = Math.min(
+    ...weatherAtLocation.hourly.temperature_2m.slice(0, 24)
+  );
+
+  const isDay = isWithinInterval(new Date(weatherAtLocation.current.time), {
+    start: new Date(weatherAtLocation.daily.sunrise[0]),
+    end: new Date(weatherAtLocation.daily.sunset[0]),
+  });
+
   const hoursToShow = isMobile ? 5 : 6;
 
   const currentTimeIndex = weatherAtLocation.hourly.time.findIndex(
     (time) => new Date(time) >= new Date(weatherAtLocation.current.time)
   );
+  const displayStartIndex = Math.max(0, currentTimeIndex);
 
   const displayTimes = weatherAtLocation.hourly.time.slice(
-    currentTimeIndex,
-    currentTimeIndex + hoursToShow
+    displayStartIndex,
+    displayStartIndex + hoursToShow
   );
   const displayTemperatures = weatherAtLocation.hourly.temperature_2m.slice(
-    currentTimeIndex,
-    currentTimeIndex + hoursToShow
+    displayStartIndex,
+    displayStartIndex + hoursToShow
   );
 
   const location =

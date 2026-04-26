@@ -174,7 +174,8 @@ export async function saveThreadMessage({
       .values({ id, threadId, role, parts, attachments })
       .returning();
     return created;
-  } catch (_error) {
+  } catch (error) {
+    console.error("Failed to save thread message:", error);
     throw new ChatbotError(
       "bad_request:database",
       "Failed to save thread message"

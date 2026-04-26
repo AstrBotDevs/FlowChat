@@ -8,6 +8,35 @@ export type ThreadMessageItem = UIMessage;
 
 export type ThreadChatStatus = "idle" | "streaming" | "error";
 
+function appendAssistantText(messages: UIMessage[], text: string) {
+  const updated = [...messages];
+  const last = updated[updated.length - 1];
+  if (!last || last.role !== "assistant") {
+    return updated;
+  }
+
+  const lastPart = last.parts[last.parts.length - 1];
+  const nextParts = [...last.parts];
+  if (lastPart && lastPart.type === "text") {
+    nextParts[nextParts.length - 1] = {
+      ...lastPart,
+      text: lastPart.text + text,
+    };
+  } else {
+    nextParts.push({
+      type: "text",
+      text,
+    });
+  }
+
+  updated[updated.length - 1] = {
+    ...last,
+    parts: nextParts,
+  };
+
+  return updated;
+}
+
 export function useThreadChat({
   chatId,
   sourceMessageId,
@@ -96,6 +125,14 @@ export function useThreadChat({
         });
 
         if (!res.ok || !res.body) {
+          let errorText = "追问生成失败，请稍后重试。";
+          try {
+            const errorPayload = await res.json();
+            errorText = errorPayload.message ?? errorPayload.error ?? errorText;
+          } catch (_) {
+            // keep fallback text
+          }
+          setMessages((prev) => appendAssistantText(prev, errorText));
           setStatus("error");
           return;
         }
@@ -103,6 +140,7 @@ export function useThreadChat({
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
         let buffer = "";
+        let streamFailed = false;
 
         while (true) {
           const { done, value } = await reader.read();
@@ -124,30 +162,18 @@ export function useThreadChat({
               const parsed = JSON.parse(payload);
 
               if (parsed.type === "text-delta" && parsed.delta) {
-                setMessages((prev) => {
-                  const updated = [...prev];
-                  const last = updated[updated.length - 1];
-                  if (last && last.role === "assistant") {
-                    const lastPart = last.parts[last.parts.length - 1];
-                    const nextParts = [...last.parts];
-                    if (lastPart && lastPart.type === "text") {
-                      nextParts[nextParts.length - 1] = {
-                        ...lastPart,
-                        text: lastPart.text + parsed.delta,
-                      };
-                    } else {
-                      nextParts.push({
-                        type: "text",
-                        text: parsed.delta,
-                      });
-                    }
-                    updated[updated.length - 1] = {
-                      ...last,
-                      parts: nextParts,
-                    };
-                  }
-                  return updated;
-                });
+                setMessages((prev) => appendAssistantText(prev, parsed.delta));
+              }
+
+              if (parsed.type === "error") {
+                streamFailed = true;
+                setMessages((prev) =>
+                  appendAssistantText(
+                    prev,
+                    parsed.errorText ?? "追问生成失败，请稍后重试。"
+                  )
+                );
+                setStatus("error");
               }
             } catch (_) {
               // skip malformed lines
@@ -155,7 +181,7 @@ export function useThreadChat({
           }
         }
 
-        setStatus("idle");
+        setStatus(streamFailed ? "error" : "idle");
       } catch (error) {
         if ((error as Error).name === "AbortError") {
           setStatus("idle");

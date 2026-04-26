@@ -3,14 +3,20 @@ import type { ThreadMessage } from "@/lib/db/schema";
 export const threadSystemPrompt =
   "你是一个专注的 AI 学习助手。请结合上一段解释的语境，聚焦回答用户的当前问题，保持清晰、易懂的教学风格。";
 
+function getThreadMessageText(message: ThreadMessage) {
+  return (message.parts as Array<{ type: string; text?: string }>)
+    .filter((p) => p.type === "text" && p.text)
+    .map((p) => p.text)
+    .join("\n");
+}
+
 /**
  * Build the message array sent to LLM for a follow-up Thread.
  *
  * Structure:
- * 1. System prompt
- * 2. Parent AI answer (fixed background, excluded from sliding window)
- * 3. Quoted text + first user question (merged into one user message)
- * 4. Remaining conversation history (subject to sliding window)
+ * 1. Parent AI answer (fixed background, excluded from sliding window)
+ * 2. Quoted text + first user question (merged into one user message)
+ * 3. Remaining conversation history (subject to sliding window)
  */
 export function buildThreadPrompt({
   sourceMessageContent,
@@ -22,13 +28,11 @@ export function buildThreadPrompt({
   quoteText: string;
   threadMessages: ThreadMessage[];
   slidingWindowSize?: number;
-}): Array<{ role: "system" | "user" | "assistant"; content: string }> {
+}): Array<{ role: "user" | "assistant"; content: string }> {
   const messages: Array<{
-    role: "system" | "user" | "assistant";
+    role: "user" | "assistant";
     content: string;
   }> = [];
-
-  messages.push({ role: "system", content: threadSystemPrompt });
 
   messages.push({
     role: "user",
@@ -40,12 +44,7 @@ export function buildThreadPrompt({
   }
 
   const firstMessage = threadMessages[0];
-  const firstMessageText = (
-    firstMessage.parts as Array<{ type: string; text?: string }>
-  )
-    .filter((p) => p.type === "text" && p.text)
-    .map((p) => p.text)
-    .join("\n");
+  const firstMessageText = getThreadMessageText(firstMessage);
 
   messages.push({
     role: "user",
@@ -59,10 +58,7 @@ export function buildThreadPrompt({
       : restMessages;
 
   for (const msg of windowedMessages) {
-    const msgText = (msg.parts as Array<{ type: string; text?: string }>)
-      .filter((p) => p.type === "text" && p.text)
-      .map((p) => p.text)
-      .join("\n");
+    const msgText = getThreadMessageText(msg);
 
     messages.push({
       role: msg.role as "user" | "assistant",

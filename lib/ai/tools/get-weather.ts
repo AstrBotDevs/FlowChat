@@ -1,6 +1,10 @@
 import { tool } from "ai";
 import { z } from "zod";
 
+type WeatherToolError = {
+  error: string;
+};
+
 async function geocodeCity(
   city: string
 ): Promise<{ latitude: number; longitude: number } | null> {
@@ -67,7 +71,26 @@ export const getWeather = tool({
       `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m&hourly=temperature_2m&daily=sunrise,sunset&timezone=auto`
     );
 
+    if (!response.ok) {
+      return {
+        error: `Weather lookup failed with status ${response.status}. Please try again later.`,
+      } satisfies WeatherToolError;
+    }
+
     const weatherData = await response.json();
+
+    if (
+      weatherData?.error ||
+      !weatherData?.current ||
+      !weatherData?.hourly ||
+      !weatherData?.daily
+    ) {
+      return {
+        error:
+          weatherData?.reason ||
+          "Weather lookup returned an unexpected response. Please try another location.",
+      } satisfies WeatherToolError;
+    }
 
     if ("city" in input) {
       weatherData.cityName = input.city;

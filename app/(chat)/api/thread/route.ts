@@ -4,7 +4,7 @@ import {
   streamText,
 } from "ai";
 import { auth } from "@/app/(auth)/auth";
-import { buildThreadPrompt } from "@/lib/ai/prompts-thread";
+import { buildThreadPrompt, threadSystemPrompt } from "@/lib/ai/prompts-thread";
 import { getLanguageModel } from "@/lib/ai/providers";
 import {
   createQuote,
@@ -21,6 +21,13 @@ import { ChatbotError } from "@/lib/errors";
 import { generateUUID } from "@/lib/utils";
 
 export const maxDuration = 60;
+
+function getTextFromParts(parts: unknown) {
+  return (parts as Array<{ type: string; text?: string }>)
+    .filter((p) => p.type === "text" && p.text)
+    .map((p) => p.text)
+    .join("\n");
+}
 
 export async function POST(request: Request) {
   let body: {
@@ -132,12 +139,7 @@ export async function POST(request: Request) {
       if (!threadMsg) {
         return new ChatbotError("not_found:chat").toResponse();
       }
-      sourceMessageContent = (
-        threadMsg.parts as Array<{ type: string; text?: string }>
-      )
-        .filter((p) => p.type === "text" && p.text)
-        .map((p) => p.text)
-        .join("\n");
+      sourceMessageContent = getTextFromParts(threadMsg.parts);
     } else {
       const [sourceMsg] = await getMessageById({
         id: quoteRecord.sourceMessageId,
@@ -145,12 +147,7 @@ export async function POST(request: Request) {
       if (!sourceMsg) {
         return new ChatbotError("not_found:chat").toResponse();
       }
-      sourceMessageContent = (
-        sourceMsg.parts as Array<{ type: string; text?: string }>
-      )
-        .filter((p) => p.type === "text" && p.text)
-        .map((p) => p.text)
-        .join("\n");
+      sourceMessageContent = getTextFromParts(sourceMsg.parts);
     }
 
     const threadMessages = await getThreadMessagesByThreadId({
@@ -169,6 +166,7 @@ export async function POST(request: Request) {
       execute: ({ writer }) => {
         const result = streamText({
           model,
+          system: threadSystemPrompt,
           messages: promptMessages,
         });
 
@@ -176,6 +174,10 @@ export async function POST(request: Request) {
       },
       generateId: generateUUID,
       onFinish: async ({ responseMessage }) => {
+        if (!responseMessage.parts.length) {
+          return;
+        }
+
         await saveThreadMessage({
           id: responseMessage.id,
           threadId: currentThread!.id,
@@ -183,6 +185,10 @@ export async function POST(request: Request) {
           parts: responseMessage.parts,
           attachments: [],
         });
+      },
+      onError: (error) => {
+        console.error("Unhandled error in thread stream:", error);
+        return "追问生成失败，请稍后重试。";
       },
     });
 
