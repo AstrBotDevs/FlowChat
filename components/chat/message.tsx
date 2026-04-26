@@ -74,6 +74,10 @@ function AnnotatedText({
     const container = containerRef.current;
     if (!container || quotes.length === 0) return;
 
+    for (const oldBadge of container.querySelectorAll("[data-anchor-badge]")) {
+      oldBadge.remove();
+    }
+
     for (const existing of container.querySelectorAll("[data-anchor-quote-id]")) {
       const parent = existing.parentNode;
       if (parent) {
@@ -150,6 +154,7 @@ function AnnotatedText({
 
       if (q.roundCount > 0) {
         const badge = document.createElement("sup");
+        badge.setAttribute("data-anchor-badge", "");
         badge.className =
           "ml-0.5 inline-flex size-4 items-center justify-center rounded-full bg-primary/10 text-[9px] font-semibold text-primary";
         badge.textContent = String(q.roundCount);
