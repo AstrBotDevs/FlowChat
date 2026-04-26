@@ -1,7 +1,8 @@
 import { auth } from "@/app/(auth)/auth";
 import {
   getQuotesByMessageId,
-  getThreadMessageCountByThreadId,
+  getThreadById,
+  getThreadMessageById,
   unlinkAllQuotesByMessageId,
   unlinkQuote,
 } from "@/lib/db/queries-thread";
@@ -22,31 +23,30 @@ export async function GET(request: Request) {
       return new ChatbotError("unauthorized:chat").toResponse();
     }
 
+    let chatId: string | undefined;
     const [msg] = await getMessageById({ id: messageId });
-    if (!msg) {
-      return Response.json([]);
+    if (msg) {
+      chatId = msg.chatId;
+    } else {
+      const threadMsg = await getThreadMessageById({ id: messageId });
+      if (!threadMsg) {
+        return Response.json([]);
+      }
+      const threadRecord = await getThreadById({ id: threadMsg.threadId });
+      if (!threadRecord) {
+        return Response.json([]);
+      }
+      chatId = threadRecord.chatId;
     }
 
-    const chat = await getChatById({ id: msg.chatId });
+    const chat = await getChatById({ id: chatId });
     if (!chat || chat.userId !== session.user.id) {
       return new ChatbotError("forbidden:chat").toResponse();
     }
 
     const quotes = await getQuotesByMessageId({ messageId });
 
-    const quotesWithRounds = await Promise.all(
-      quotes.map(async (q) => {
-        const roundCount = await getThreadMessageCountByThreadId({
-          threadId: q.childThreadId,
-        });
-        return {
-          ...q,
-          roundCount: Math.floor(roundCount / 2),
-        };
-      })
-    );
-
-    return Response.json(quotesWithRounds);
+    return Response.json(quotes);
   } catch (error) {
     if (error instanceof ChatbotError) {
       return error.toResponse();

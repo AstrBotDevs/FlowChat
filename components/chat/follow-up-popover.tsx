@@ -17,12 +17,18 @@ import {
   useState,
 } from "react";
 import { createPortal } from "react-dom";
+import useSWR from "swr";
 import { MessageResponse } from "@/components/ai-elements/message";
-import { cn } from "@/lib/utils";
+import { cn, fetcher } from "@/lib/utils";
 import {
   useThreadChat,
   type ThreadMessageItem,
 } from "@/hooks/use-thread-chat";
+import { AnnotatedText, type AnnotatedQuote } from "./annotated-text";
+
+type QuoteWithRounds = AnnotatedQuote & {
+  sourceMessageId: string;
+};
 
 export type PopoverBreadcrumb = {
   quoteText: string;
@@ -212,6 +218,25 @@ export function FollowUpPopover({
     [currentQuoteText, threadId, resetChat]
   );
 
+  const handleExistingNestedAnchor = useCallback(
+    (info: {
+      quoteText: string;
+      sourceMessageId: string;
+      threadId: string;
+    }) => {
+      setBreadcrumbs((prev) => [
+        ...prev,
+        { quoteText: currentQuoteText, threadId: threadId ?? "" },
+      ]);
+      setCurrentQuoteText(info.quoteText);
+      setCurrentSourceMessageId(info.sourceMessageId);
+      setCurrentSourceThreadId(threadId ?? null);
+      setCurrentExistingThreadId(info.threadId);
+      resetChat();
+    },
+    [currentQuoteText, threadId, resetChat]
+  );
+
   const handleBreadcrumbBack = useCallback(() => {
     if (breadcrumbs.length === 0) return;
     const prev = breadcrumbs[breadcrumbs.length - 1];
@@ -251,10 +276,6 @@ export function FollowUpPopover({
       setNestedSelection({ text, msgId, rect: range.getBoundingClientRect() });
     }, 100);
   }, []);
-
-  const roundCount = Math.floor(
-    messages.filter((m) => m.role === "user").length
-  );
 
   const hasConversation = messages.length > 0;
 
@@ -314,12 +335,6 @@ export function FollowUpPopover({
           {currentQuoteText}
         </span>
 
-        {roundCount > 0 && (
-          <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
-            {roundCount}轮
-          </span>
-        )}
-
         <button
           className="shrink-0 rounded-md p-0.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
           onClick={() => onClose(messages.length > 0)}
@@ -354,6 +369,7 @@ export function FollowUpPopover({
               }
               key={msg.id}
               message={msg}
+              onAnchorClick={handleExistingNestedAnchor}
             />
           ))}
 
@@ -427,13 +443,40 @@ function ThreadMessageBubble({
   message,
   isStreaming,
   isLatestAssistant,
+  onAnchorClick,
 }: {
   message: ThreadMessageItem;
   isStreaming: boolean;
   isLatestAssistant: boolean;
+  onAnchorClick?: (info: {
+    quoteText: string;
+    sourceMessageId: string;
+    threadId: string;
+  }) => void;
 }) {
   const isUser = message.role === "user";
   const messageText = getThreadMessageText(message);
+
+  const { data: quotesData, mutate: mutateQuotes } = useSWR<QuoteWithRounds[]>(
+    !isUser && !isStreaming
+      ? `${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/api/quote?messageId=${message.id}`
+      : null,
+    fetcher,
+    { revalidateOnFocus: false }
+  );
+  const quotes = quotesData ?? [];
+
+  const handleUnlink = useCallback(
+    async (quoteId: string) => {
+      await fetch(`${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/api/quote`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ quoteId }),
+      });
+      mutateQuotes();
+    },
+    [mutateQuotes]
+  );
 
   if (isUser) {
     return (
@@ -446,12 +489,30 @@ function ThreadMessageBubble({
   }
 
   const content = messageText + (isStreaming && isLatestAssistant ? "▍" : "");
+  const hasQuotes = !isStreaming && quotes.length > 0 && onAnchorClick;
 
   return (
     <div className="flex justify-start" data-thread-msg-id={message.id}>
       <div className="max-w-[95%] text-xs leading-relaxed">
         {content ? (
-          <MessageResponse>{content}</MessageResponse>
+          hasQuotes ? (
+            <AnnotatedText
+              onAnchorClick={(threadId, quoteId) => {
+                const q = quotes.find((item) => item.id === quoteId);
+                if (!q || !onAnchorClick) return;
+                onAnchorClick({
+                  quoteText: q.quoteText,
+                  sourceMessageId: q.sourceMessageId,
+                  threadId,
+                });
+              }}
+              onUnlink={handleUnlink}
+              quotes={quotes}
+              text={content}
+            />
+          ) : (
+            <MessageResponse>{content}</MessageResponse>
+          )
         ) : (
           <span className="text-muted-foreground">思考中...</span>
         )}

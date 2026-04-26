@@ -9,7 +9,6 @@ export type AnchorIndexItem = {
   id: string;
   quoteText: string;
   threadId: string;
-  roundCount: number;
 };
 
 export function AnchorIndex({
@@ -65,11 +64,6 @@ export function AnchorIndex({
                   >
                     「{q.quoteText}」
                   </button>
-                  {q.roundCount > 0 && (
-                    <span className="shrink-0 text-muted-foreground">
-                      {q.roundCount}轮
-                    </span>
-                  )}
                   <button
                     className="shrink-0 text-muted-foreground transition-colors hover:text-destructive"
                     onClick={() => onUnlink(q.id)}

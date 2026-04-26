@@ -219,25 +219,6 @@ export async function getThreadMessagesByThreadId({
   }
 }
 
-export async function getThreadMessageCountByThreadId({
-  threadId,
-}: {
-  threadId: string;
-}): Promise<number> {
-  try {
-    const messages = await db
-      .select({ id: threadMessage.id })
-      .from(threadMessage)
-      .where(eq(threadMessage.threadId, threadId));
-    return messages.length;
-  } catch (_error) {
-    throw new ChatbotError(
-      "bad_request:database",
-      "Failed to count thread messages"
-    );
-  }
-}
-
 // ---- Cascade delete (called by deleteChatById / deleteAllChatsByUserId) ----
 
 export async function deleteThreadDataByChatId({
