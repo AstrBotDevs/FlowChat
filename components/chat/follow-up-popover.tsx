@@ -33,6 +33,13 @@ const POPOVER_WIDTH = 380;
 const POPOVER_MAX_HEIGHT = 400;
 const GAP = 8;
 
+function getThreadMessageText(message: ThreadMessageItem) {
+  return message.parts
+    .filter((part) => part.type === "text")
+    .map((part) => part.text)
+    .join("");
+}
+
 function useAnchorPosition(anchorId: string) {
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
 
@@ -426,18 +433,19 @@ function ThreadMessageBubble({
   isLatestAssistant: boolean;
 }) {
   const isUser = message.role === "user";
+  const messageText = getThreadMessageText(message);
 
   if (isUser) {
     return (
       <div className="flex justify-end">
         <div className="max-w-[85%] rounded-xl rounded-br-md bg-secondary px-3 py-1.5 text-xs leading-relaxed">
-          {message.content}
+          {messageText}
         </div>
       </div>
     );
   }
 
-  const content = message.content + (isStreaming && isLatestAssistant ? "▍" : "");
+  const content = messageText + (isStreaming && isLatestAssistant ? "▍" : "");
 
   return (
     <div className="flex justify-start" data-thread-msg-id={message.id}>

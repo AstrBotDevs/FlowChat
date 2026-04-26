@@ -159,17 +159,19 @@ export async function saveThreadMessage({
   id,
   threadId,
   role,
-  content,
+  parts,
+  attachments,
 }: {
   id: string;
   threadId: string;
   role: string;
-  content: string;
+  parts: unknown;
+  attachments: unknown;
 }): Promise<ThreadMessage> {
   try {
     const [created] = await db
       .insert(threadMessage)
-      .values({ id, threadId, role, content })
+      .values({ id, threadId, role, parts, attachments })
       .returning();
     return created;
   } catch (_error) {

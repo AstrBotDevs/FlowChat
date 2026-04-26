@@ -2,10 +2,12 @@ import type { InferSelectModel } from "drizzle-orm";
 import {
   boolean,
   foreignKey,
+  json,
   pgTable,
   text,
   timestamp,
   uuid,
+  varchar,
 } from "drizzle-orm/pg-core";
 import { chat, message } from "./schema";
 
@@ -49,8 +51,9 @@ export const threadMessage = pgTable("ThreadMessage", {
   threadId: uuid("threadId")
     .notNull()
     .references(() => thread.id),
-  role: text("role").notNull(),
-  content: text("content").notNull(),
+  role: varchar("role").notNull(),
+  parts: json("parts").notNull(),
+  attachments: json("attachments").notNull(),
   createdAt: timestamp("createdAt").notNull().defaultNow(),
 });
 

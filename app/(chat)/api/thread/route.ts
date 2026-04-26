@@ -1,4 +1,8 @@
-import { streamText } from "ai";
+import {
+  createUIMessageStream,
+  createUIMessageStreamResponse,
+  streamText,
+} from "ai";
 import { auth } from "@/app/(auth)/auth";
 import { buildThreadPrompt } from "@/lib/ai/prompts-thread";
 import { getLanguageModel } from "@/lib/ai/providers";
@@ -103,7 +107,8 @@ export async function POST(request: Request) {
       id: generateUUID(),
       threadId: currentThread.id,
       role: "user",
-      content: userMessage,
+      parts: [{ type: "text", text: userMessage }],
+      attachments: [],
     });
 
     const quoteId =
@@ -127,7 +132,12 @@ export async function POST(request: Request) {
       if (!threadMsg) {
         return new ChatbotError("not_found:chat").toResponse();
       }
-      sourceMessageContent = threadMsg.content;
+      sourceMessageContent = (
+        threadMsg.parts as Array<{ type: string; text?: string }>
+      )
+        .filter((p) => p.type === "text" && p.text)
+        .map((p) => p.text)
+        .join("\n");
     } else {
       const [sourceMsg] = await getMessageById({
         id: quoteRecord.sourceMessageId,
@@ -155,55 +165,28 @@ export async function POST(request: Request) {
 
     const model = await getLanguageModel(selectedChatModel, userId);
 
-    const result = streamText({
-      model,
-      messages: promptMessages,
-    });
+    const stream = createUIMessageStream({
+      execute: ({ writer }) => {
+        const result = streamText({
+          model,
+          messages: promptMessages,
+        });
 
-    const encoder = new TextEncoder();
-    let fullAssistantContent = "";
-
-    const readableStream = new ReadableStream({
-      async start(controller) {
-        try {
-          for await (const chunk of result.textStream) {
-            fullAssistantContent += chunk;
-            controller.enqueue(
-              encoder.encode(`data: ${JSON.stringify({ text: chunk })}\n\n`)
-            );
-          }
-
-          await saveThreadMessage({
-            id: generateUUID(),
-            threadId: currentThread!.id,
-            role: "assistant",
-            content: fullAssistantContent,
-          });
-
-          controller.enqueue(
-            encoder.encode(
-              `data: ${JSON.stringify({ done: true, threadId: currentThread!.id })}\n\n`
-            )
-          );
-          controller.close();
-        } catch (_error) {
-          controller.enqueue(
-            encoder.encode(
-              `data: ${JSON.stringify({ error: "Stream error" })}\n\n`
-            )
-          );
-          controller.close();
-        }
+        writer.merge(result.toUIMessageStream());
+      },
+      generateId: generateUUID,
+      onFinish: async ({ responseMessage }) => {
+        await saveThreadMessage({
+          id: responseMessage.id,
+          threadId: currentThread!.id,
+          role: "assistant",
+          parts: responseMessage.parts,
+          attachments: [],
+        });
       },
     });
 
-    return new Response(readableStream, {
-      headers: {
-        "Content-Type": "text/event-stream",
-        "Cache-Control": "no-cache",
-        Connection: "keep-alive",
-      },
-    });
+    return createUIMessageStreamResponse({ stream });
   } catch (error) {
     if (error instanceof ChatbotError) {
       return error.toResponse();

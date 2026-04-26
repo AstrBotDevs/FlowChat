@@ -2,14 +2,9 @@
 
 import { useCallback, useRef, useState } from "react";
 import { generateUUID } from "@/lib/utils";
+import type { UIMessage } from "ai";
 
-export type ThreadMessageItem = {
-  id: string;
-  threadId: string;
-  role: string;
-  content: string;
-  createdAt: string;
-};
+export type ThreadMessageItem = UIMessage;
 
 export type ThreadChatStatus = "idle" | "streaming" | "error";
 
@@ -28,7 +23,7 @@ export function useThreadChat({
   existingThreadId?: string;
   selectedChatModel: string;
 }) {
-  const [messages, setMessages] = useState<ThreadMessageItem[]>([]);
+  const [messages, setMessages] = useState<UIMessage[]>([]);
   const [status, setStatus] = useState<ThreadChatStatus>("idle");
   const [threadId, setThreadId] = useState<string | null>(
     existingThreadId ?? null
@@ -62,23 +57,19 @@ export function useThreadChat({
         setThreadId(currentThreadId);
       }
 
-      const userMsg: ThreadMessageItem = {
+      const userMsg: UIMessage = {
         id: generateUUID(),
-        threadId: currentThreadId,
         role: "user",
-        content: text,
-        createdAt: new Date().toISOString(),
+        parts: [{ type: "text", text }],
       };
 
       setMessages((prev) => [...prev, userMsg]);
       setStatus("streaming");
 
-      const assistantMsg: ThreadMessageItem = {
+      const assistantMsg: UIMessage = {
         id: generateUUID(),
-        threadId: currentThreadId,
         role: "assistant",
-        content: "",
-        createdAt: new Date().toISOString(),
+        parts: [],
       };
 
       setMessages((prev) => [...prev, assistantMsg]);
@@ -118,33 +109,48 @@ export function useThreadChat({
           if (done) break;
 
           buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split("\n\n");
+          const lines = buffer.split("\n");
           buffer = lines.pop() ?? "";
 
           for (const line of lines) {
-            if (!line.startsWith("data: ")) continue;
-            try {
-              const data = JSON.parse(line.slice(6));
+            const trimmedLine = line.trim();
+            if (!trimmedLine || trimmedLine.startsWith(":")) continue;
+            if (!trimmedLine.startsWith("data:")) continue;
 
-              if (data.text) {
+            const payload = trimmedLine.slice(5).trim();
+            if (!payload || payload === "[DONE]") continue;
+
+            try {
+              const parsed = JSON.parse(payload);
+
+              if (parsed.type === "text-delta" && parsed.delta) {
                 setMessages((prev) => {
                   const updated = [...prev];
                   const last = updated[updated.length - 1];
                   if (last && last.role === "assistant") {
+                    const lastPart = last.parts[last.parts.length - 1];
+                    const nextParts = [...last.parts];
+                    if (lastPart && lastPart.type === "text") {
+                      nextParts[nextParts.length - 1] = {
+                        ...lastPart,
+                        text: lastPart.text + parsed.delta,
+                      };
+                    } else {
+                      nextParts.push({
+                        type: "text",
+                        text: parsed.delta,
+                      });
+                    }
                     updated[updated.length - 1] = {
                       ...last,
-                      content: last.content + data.text,
+                      parts: nextParts,
                     };
                   }
                   return updated;
                 });
               }
-
-              if (data.done && data.threadId) {
-                setThreadId(data.threadId);
-              }
             } catch (_) {
-              // skip malformed SSE lines
+              // skip malformed lines
             }
           }
         }

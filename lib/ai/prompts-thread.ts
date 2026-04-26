@@ -40,9 +40,16 @@ export function buildThreadPrompt({
   }
 
   const firstMessage = threadMessages[0];
+  const firstMessageText = (
+    firstMessage.parts as Array<{ type: string; text?: string }>
+  )
+    .filter((p) => p.type === "text" && p.text)
+    .map((p) => p.text)
+    .join("\n");
+
   messages.push({
     role: "user",
-    content: `【用户在上面的解释中选中了】：\n『${quoteText}』\n\n【用户的追问】：\n${firstMessage.content}`,
+    content: `【用户在上面的解释中选中了】：\n『${quoteText}』\n\n【用户的追问】：\n${firstMessageText}`,
   });
 
   const restMessages = threadMessages.slice(1);
@@ -52,9 +59,14 @@ export function buildThreadPrompt({
       : restMessages;
 
   for (const msg of windowedMessages) {
+    const msgText = (msg.parts as Array<{ type: string; text?: string }>)
+      .filter((p) => p.type === "text" && p.text)
+      .map((p) => p.text)
+      .join("\n");
+
     messages.push({
       role: msg.role as "user" | "assistant",
-      content: msg.content,
+      content: msgText,
     });
   }
 
