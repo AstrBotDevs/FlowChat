@@ -4,7 +4,7 @@ import { useCallback, useRef, useState } from "react";
 import useSWR from "swr";
 import type { Vote } from "@/lib/db/schema";
 import type { ChatMessage } from "@/lib/types";
-import { cn, fetcher, generateUUID, sanitizeText } from "@/lib/utils";
+import { cn, fetcher, sanitizeText } from "@/lib/utils";
 import { useTextSelection } from "@/hooks/use-text-selection";
 import { MessageContent, MessageResponse } from "../ai-elements/message";
 import { Shimmer } from "../ai-elements/shimmer";
@@ -21,7 +21,7 @@ import { useDataStream } from "./data-stream-provider";
 import { DocumentToolResult } from "./document";
 import { DocumentPreview } from "./document-preview";
 import { FollowUpButton } from "./follow-up-button";
-import { FollowUpPopover } from "./follow-up-popover";
+import { FollowUpPopover, type FollowUpPopoverAnchor } from "./follow-up-popover";
 import { SparklesIcon } from "./icons";
 import { MessageActions } from "./message-actions";
 import { MessageReasoning } from "./message-reasoning";
@@ -43,7 +43,7 @@ type ActivePopoverState = {
   sourceMessageId: string;
   sourceThreadId: string | null;
   existingThreadId?: string;
-  anchorId: string;
+  anchor: FollowUpPopoverAnchor;
 } | null;
 
 const PurePreviewMessage = ({
@@ -108,48 +108,30 @@ const PurePreviewMessage = ({
   const handleFollowUp = useCallback(() => {
     if (!selection) return;
 
-    const anchorId = `thread-anchor-${generateUUID()}`;
     const sel = window.getSelection();
-    if (sel && sel.rangeCount > 0) {
-      const range = sel.getRangeAt(0);
-      const anchor = document.createElement("span");
-      anchor.id = anchorId;
-      anchor.setAttribute("data-thread-anchor", "");
-      anchor.style.cssText = "position:relative;display:inline;width:0;height:0;overflow:hidden;";
-      range.collapse(false);
-      range.insertNode(anchor);
-      sel.removeAllRanges();
-    }
+    if (!sel || sel.rangeCount === 0) return;
+
+    const range = sel.getRangeAt(0).cloneRange();
+    sel.removeAllRanges();
 
     setActivePopover({
       quoteText: selection.text,
       sourceMessageId: message.id,
       sourceThreadId: null,
-      anchorId,
+      anchor: { kind: "range", range },
     });
     clearSelection();
   }, [selection, message.id, clearSelection]);
 
   const handleAnchorClick = useCallback(
     (threadId: string, quoteId: string) => {
-      const anchorEl = document.querySelector(`[data-anchor-quote-id="${quoteId}"]`);
-      const anchorId = `thread-anchor-${generateUUID()}`;
-
-      if (anchorEl) {
-        const span = document.createElement("span");
-        span.id = anchorId;
-        span.setAttribute("data-thread-anchor", "");
-        span.style.cssText = "position:relative;display:inline;width:0;height:0;overflow:hidden;";
-        anchorEl.after(span);
-      }
-
       setActivePopover({
         quoteText:
           quotes.find((q) => q.childThreadId === threadId)?.quoteText ?? "",
         sourceMessageId: message.id,
         sourceThreadId: null,
         existingThreadId: threadId,
-        anchorId,
+        anchor: { kind: "quoteId", quoteId },
       });
     },
     [quotes, message.id]
@@ -178,15 +160,12 @@ const PurePreviewMessage = ({
 
   const handlePopoverClose = useCallback(
     (hasMessages: boolean) => {
-      if (activePopover?.anchorId) {
-        document.getElementById(activePopover.anchorId)?.remove();
-      }
       setActivePopover(null);
       if (hasMessages) {
         mutateQuotes();
       }
     },
-    [mutateQuotes, activePopover?.anchorId]
+    [mutateQuotes]
   );
 
   const anchorIndexItems: AnchorIndexItem[] = quotes.map((q) => ({
@@ -471,7 +450,7 @@ const PurePreviewMessage = ({
 
       {activePopover && (
         <FollowUpPopover
-          anchorId={activePopover.anchorId}
+          anchor={activePopover.anchor}
           chatId={chatId}
           existingThreadId={activePopover.existingThreadId}
           onClose={handlePopoverClose}

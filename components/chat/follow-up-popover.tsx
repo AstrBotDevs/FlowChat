@@ -39,6 +39,10 @@ const POPOVER_WIDTH = 380;
 const POPOVER_MAX_HEIGHT = 400;
 const GAP = 8;
 
+export type FollowUpPopoverAnchor =
+  | { kind: "range"; range: Range }
+  | { kind: "quoteId"; quoteId: string };
+
 function getThreadMessageText(message: ThreadMessageItem) {
   return message.parts
     .filter((part) => part.type === "text")
@@ -46,41 +50,83 @@ function getThreadMessageText(message: ThreadMessageItem) {
     .join("");
 }
 
-function useAnchorPosition(anchorId: string) {
+function getAnchorRect(anchor: FollowUpPopoverAnchor): DOMRect | null {
+  if (anchor.kind === "range") {
+    const r = anchor.range.getBoundingClientRect();
+    if (r.width === 0 && r.height === 0) return null;
+    return r;
+  }
+  const el = document.querySelector(
+    `[data-anchor-quote-id="${anchor.quoteId}"]`
+  );
+  return (el as HTMLElement | null)?.getBoundingClientRect() ?? null;
+}
+
+function useAnchorPosition(
+  anchor: FollowUpPopoverAnchor,
+  popoverEl: HTMLDivElement | null
+) {
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
 
   useEffect(() => {
-    const anchor = document.getElementById(anchorId);
-    if (!anchor) return;
+    let raf = 0;
 
     const update = () => {
-      const rect = anchor.getBoundingClientRect();
-      const spaceBelow = window.innerHeight - rect.bottom;
-      const flip = spaceBelow < POPOVER_MAX_HEIGHT + GAP * 2;
+      const rect = getAnchorRect(anchor);
+      if (!rect) return;
 
-      const top = flip
-        ? Math.max(GAP, rect.top - POPOVER_MAX_HEIGHT - GAP)
-        : rect.bottom + GAP;
+      const popoverRect = popoverEl?.getBoundingClientRect();
+      const popoverHeight = popoverRect?.height ?? POPOVER_MAX_HEIGHT;
+      const popoverWidth = popoverRect?.width ?? POPOVER_WIDTH;
 
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+
+      const anchorCenterX = rect.left + rect.width / 2;
       const left = Math.max(
         GAP,
-        Math.min(rect.left, window.innerWidth - POPOVER_WIDTH - GAP)
+        Math.min(anchorCenterX - popoverWidth / 2, vw - popoverWidth - GAP)
       );
 
-      setPos({ top, left });
+      const spaceBelow = vh - rect.bottom - GAP;
+      const spaceAbove = rect.top - GAP;
+      const flip = spaceBelow < popoverHeight && spaceAbove > spaceBelow;
+
+      const top = flip
+        ? Math.max(GAP, rect.top - popoverHeight - GAP)
+        : Math.min(rect.bottom + GAP, vh - popoverHeight - GAP);
+
+      setPos((prev) => {
+        if (prev && prev.top === top && prev.left === left) return prev;
+        return { top, left };
+      });
+    };
+
+    const tick = () => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(update);
     };
 
     update();
 
-    const scroller = anchor.closest("[data-scroll-container], .overflow-y-auto");
-    scroller?.addEventListener("scroll", update, { passive: true });
-    window.addEventListener("resize", update, { passive: true });
+    document.addEventListener("scroll", tick, true);
+    window.addEventListener("resize", tick);
+    window.visualViewport?.addEventListener("resize", tick);
+
+    let ro: ResizeObserver | null = null;
+    if (popoverEl && typeof ResizeObserver !== "undefined") {
+      ro = new ResizeObserver(tick);
+      ro.observe(popoverEl);
+    }
 
     return () => {
-      scroller?.removeEventListener("scroll", update);
-      window.removeEventListener("resize", update);
+      cancelAnimationFrame(raf);
+      document.removeEventListener("scroll", tick, true);
+      window.removeEventListener("resize", tick);
+      window.visualViewport?.removeEventListener("resize", tick);
+      ro?.disconnect();
     };
-  }, [anchorId]);
+  }, [anchor, popoverEl]);
 
   return pos;
 }
@@ -92,7 +138,7 @@ export function FollowUpPopover({
   sourceThreadId,
   existingThreadId,
   selectedChatModel,
-  anchorId,
+  anchor,
   onClose,
   breadcrumbs: externalBreadcrumbs,
 }: {
@@ -102,7 +148,7 @@ export function FollowUpPopover({
   sourceThreadId: string | null;
   existingThreadId?: string;
   selectedChatModel: string;
-  anchorId: string;
+  anchor: FollowUpPopoverAnchor;
   onClose: (hasMessages: boolean) => void;
   breadcrumbs?: PopoverBreadcrumb[];
 }) {
@@ -120,9 +166,9 @@ export function FollowUpPopover({
 
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const conversationRef = useRef<HTMLDivElement>(null);
-  const popoverRef = useRef<HTMLDivElement>(null);
+  const [popoverEl, setPopoverEl] = useState<HTMLDivElement | null>(null);
 
-  const pos = useAnchorPosition(anchorId);
+  const pos = useAnchorPosition(anchor, popoverEl);
 
   const {
     messages,
@@ -166,10 +212,7 @@ export function FollowUpPopover({
     };
 
     const handleClickOutside = (e: MouseEvent) => {
-      if (
-        popoverRef.current &&
-        !popoverRef.current.contains(e.target as Node)
-      ) {
+      if (popoverEl && !popoverEl.contains(e.target as Node)) {
         onClose(messages.length > 0);
       }
     };
@@ -184,7 +227,7 @@ export function FollowUpPopover({
       document.removeEventListener("mousedown", handleClickOutside);
       clearTimeout(timer);
     };
-  }, [onClose, messages.length]);
+  }, [onClose, messages.length, popoverEl]);
 
   const handleSend = useCallback(() => {
     const text = inputValue.trim();
@@ -287,7 +330,7 @@ export function FollowUpPopover({
       className="flex flex-col overflow-hidden rounded-xl border border-border/60 bg-background shadow-xl"
       exit={{ opacity: 0, y: 4, scale: 0.98 }}
       initial={{ opacity: 0, y: 8, scale: 0.96 }}
-      ref={popoverRef}
+      ref={setPopoverEl}
       style={{
         position: "fixed",
         top: pos.top,
