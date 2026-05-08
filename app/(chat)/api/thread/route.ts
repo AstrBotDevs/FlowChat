@@ -6,6 +6,7 @@ import {
 import { auth } from "@/app/(auth)/auth";
 import { buildThreadPrompt, threadSystemPrompt } from "@/lib/ai/prompts-thread";
 import { getLanguageModel } from "@/lib/ai/providers";
+import { getChatById, getMessageById } from "@/lib/db/queries";
 import {
   createQuote,
   createThread,
@@ -16,7 +17,6 @@ import {
   saveThreadMessage,
   updateThreadSourceQuoteId,
 } from "@/lib/db/queries-thread";
-import { getChatById, getMessageById } from "@/lib/db/queries";
 import { ChatbotError } from "@/lib/errors";
 import { generateUUID } from "@/lib/utils";
 
@@ -27,6 +27,27 @@ function getTextFromParts(parts: unknown) {
     .filter((p) => p.type === "text" && p.text)
     .map((p) => p.text)
     .join("\n");
+}
+
+async function getChatIdForSourceMessage({
+  messageId,
+  isThreadMessage,
+}: {
+  messageId: string;
+  isThreadMessage: boolean;
+}) {
+  if (isThreadMessage) {
+    const threadMsg = await getThreadMessageById({ id: messageId });
+    if (!threadMsg) {
+      return null;
+    }
+
+    const threadRecord = await getThreadById({ id: threadMsg.threadId });
+    return threadRecord?.chatId ?? null;
+  }
+
+  const [sourceMsg] = await getMessageById({ id: messageId });
+  return sourceMsg?.chatId ?? null;
 }
 
 export async function POST(request: Request) {
@@ -52,7 +73,7 @@ export async function POST(request: Request) {
       return new ChatbotError("unauthorized:chat").toResponse();
     }
 
-    const userId = session.user.id!;
+    const userId = session.user.id;
     const {
       threadId,
       chatId,
@@ -71,6 +92,10 @@ export async function POST(request: Request) {
     let currentThread = await getThreadById({ id: threadId });
     let resolvedQuoteId: string | null = null;
 
+    if (currentThread && currentThread.chatId !== chatId) {
+      return new ChatbotError("forbidden:chat").toResponse();
+    }
+
     if (!currentThread) {
       if (!sourceMessageId || !quoteText) {
         return new ChatbotError(
@@ -81,6 +106,22 @@ export async function POST(request: Request) {
 
       const newQuoteId = generateUUID();
       const parentId = sourceThreadId || null;
+
+      if (parentId) {
+        const parentThread = await getThreadById({ id: parentId });
+        if (!parentThread || parentThread.chatId !== chatId) {
+          return new ChatbotError("forbidden:chat").toResponse();
+        }
+      }
+
+      const sourceChatId = await getChatIdForSourceMessage({
+        messageId: sourceMessageId,
+        isThreadMessage: Boolean(parentId),
+      });
+
+      if (sourceChatId !== chatId) {
+        return new ChatbotError("forbidden:chat").toResponse();
+      }
 
       await createThread({
         id: threadId,
@@ -118,8 +159,7 @@ export async function POST(request: Request) {
       attachments: [],
     });
 
-    const quoteId =
-      resolvedQuoteId ?? currentThread.sourceQuoteId;
+    const quoteId = resolvedQuoteId ?? currentThread.sourceQuoteId;
 
     if (!quoteId) {
       return new ChatbotError("not_found:chat").toResponse();
@@ -130,9 +170,23 @@ export async function POST(request: Request) {
       return new ChatbotError("not_found:chat").toResponse();
     }
 
+    if (quoteRecord.childThreadId !== currentThread.id) {
+      return new ChatbotError("forbidden:chat").toResponse();
+    }
+
+    const currentThreadId = currentThread.id;
     let sourceMessageContent: string;
 
     if (quoteRecord.sourceThreadId) {
+      const sourceChatId = await getChatIdForSourceMessage({
+        messageId: quoteRecord.sourceMessageId,
+        isThreadMessage: true,
+      });
+
+      if (sourceChatId !== chatId) {
+        return new ChatbotError("forbidden:chat").toResponse();
+      }
+
       const threadMsg = await getThreadMessageById({
         id: quoteRecord.sourceMessageId,
       });
@@ -141,6 +195,15 @@ export async function POST(request: Request) {
       }
       sourceMessageContent = getTextFromParts(threadMsg.parts);
     } else {
+      const sourceChatId = await getChatIdForSourceMessage({
+        messageId: quoteRecord.sourceMessageId,
+        isThreadMessage: false,
+      });
+
+      if (sourceChatId !== chatId) {
+        return new ChatbotError("forbidden:chat").toResponse();
+      }
+
       const [sourceMsg] = await getMessageById({
         id: quoteRecord.sourceMessageId,
       });
@@ -180,7 +243,7 @@ export async function POST(request: Request) {
 
         await saveThreadMessage({
           id: responseMessage.id,
-          threadId: currentThread!.id,
+          threadId: currentThreadId,
           role: "assistant",
           parts: responseMessage.parts,
           attachments: [],

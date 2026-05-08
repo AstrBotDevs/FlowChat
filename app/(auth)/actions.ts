@@ -2,9 +2,9 @@
 
 import { z } from "zod";
 
-import { createUser, getUser } from "@/lib/db/queries";
+import { createUser, getUser, migrateUserData } from "@/lib/db/queries";
 
-import { signIn } from "./auth";
+import { auth, signIn } from "./auth";
 
 const authFormSchema = z.object({
   email: z.string().email(),
@@ -25,11 +25,25 @@ export const login = async (
       password: formData.get("password"),
     });
 
+    const currentSession = await auth();
+
     await signIn("credentials", {
       email: validatedData.email,
       password: validatedData.password,
       redirect: false,
     });
+
+    const [targetUser] = await getUser(validatedData.email);
+    if (
+      currentSession?.user?.type === "guest" &&
+      currentSession.user.id &&
+      targetUser?.id
+    ) {
+      await migrateUserData({
+        fromUserId: currentSession.user.id,
+        toUserId: targetUser.id,
+      });
+    }
 
     return { status: "success" };
   } catch (error) {
@@ -66,7 +80,23 @@ export const register = async (
     if (user) {
       return { status: "user_exists" } as RegisterActionState;
     }
+
+    const currentSession = await auth();
     await createUser(validatedData.email, validatedData.password);
+
+    const [createdUser] = await getUser(validatedData.email);
+
+    if (
+      currentSession?.user?.type === "guest" &&
+      currentSession.user.id &&
+      createdUser?.id
+    ) {
+      await migrateUserData({
+        fromUserId: currentSession.user.id,
+        toUserId: createdUser.id,
+      });
+    }
+
     await signIn("credentials", {
       email: validatedData.email,
       password: validatedData.password,

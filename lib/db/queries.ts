@@ -18,6 +18,7 @@ import type { ArtifactKind } from "@/components/chat/artifact";
 import type { VisibilityType } from "@/components/chat/visibility-selector";
 import { ChatbotError } from "../errors";
 import { generateUUID } from "../utils";
+import { deleteThreadDataByChatId } from "./queries-thread";
 import {
   type Chat,
   chat,
@@ -28,12 +29,12 @@ import {
   stream,
   suggestion,
   type User,
-  user,
   type UserProvider,
+  user,
   userProvider,
   vote,
 } from "./schema";
-import { deleteThreadDataByChatId } from "./queries-thread";
+import { quote, thread, threadMessage } from "./schema-thread";
 import { generateHashedPassword } from "./utils";
 
 const client = postgres(process.env.POSTGRES_URL ?? "");
@@ -50,6 +51,19 @@ export async function getUser(email: string): Promise<User[]> {
   }
 }
 
+export async function getUserById({
+  id,
+}: {
+  id: string;
+}): Promise<User | null> {
+  try {
+    const [selectedUser] = await db.select().from(user).where(eq(user.id, id));
+    return selectedUser ?? null;
+  } catch (_error) {
+    throw new ChatbotError("bad_request:database", "Failed to get user by id");
+  }
+}
+
 export async function createUser(email: string, password: string) {
   const hashedPassword = generateHashedPassword(password);
 
@@ -60,8 +74,31 @@ export async function createUser(email: string, password: string) {
   }
 }
 
+export async function updateUserPassword({
+  userId,
+  password,
+}: {
+  userId: string;
+  password: string;
+}) {
+  const hashedPassword = generateHashedPassword(password);
+
+  try {
+    return await db
+      .update(user)
+      .set({ password: hashedPassword, updatedAt: new Date() })
+      .where(eq(user.id, userId))
+      .returning({ id: user.id });
+  } catch (_error) {
+    throw new ChatbotError(
+      "bad_request:database",
+      "Failed to update user password"
+    );
+  }
+}
+
 export async function createGuestUser() {
-  const email = `guest-${Date.now()}`;
+  const email = `guest-${Date.now()}-${generateUUID()}`;
   const password = generateHashedPassword(generateUUID());
 
   try {
@@ -73,6 +110,156 @@ export async function createGuestUser() {
     throw new ChatbotError(
       "bad_request:database",
       "Failed to create guest user"
+    );
+  }
+}
+
+export async function exportUserData({ userId }: { userId: string }) {
+  try {
+    const [selectedUser] = await db
+      .select({
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        emailVerified: user.emailVerified,
+        image: user.image,
+        isAnonymous: user.isAnonymous,
+        createdAt: user.createdAt,
+        updatedAt: user.updatedAt,
+      })
+      .from(user)
+      .where(eq(user.id, userId));
+
+    if (!selectedUser) {
+      throw new ChatbotError("not_found:database", "User not found");
+    }
+
+    const [userChats, documents, suggestions, providers] = await Promise.all([
+      db.select().from(chat).where(eq(chat.userId, userId)),
+      db.select().from(document).where(eq(document.userId, userId)),
+      db.select().from(suggestion).where(eq(suggestion.userId, userId)),
+      db
+        .select({
+          id: userProvider.id,
+          userId: userProvider.userId,
+          providerId: userProvider.providerId,
+          baseUrl: userProvider.baseUrl,
+          providerType: userProvider.providerType,
+          createdAt: userProvider.createdAt,
+          updatedAt: userProvider.updatedAt,
+        })
+        .from(userProvider)
+        .where(eq(userProvider.userId, userId)),
+    ]);
+
+    const chatIds = userChats.map(({ id }) => id);
+    const [messages, votes, streams, threads] =
+      chatIds.length > 0
+        ? await Promise.all([
+            db.select().from(message).where(inArray(message.chatId, chatIds)),
+            db.select().from(vote).where(inArray(vote.chatId, chatIds)),
+            db.select().from(stream).where(inArray(stream.chatId, chatIds)),
+            db.select().from(thread).where(inArray(thread.chatId, chatIds)),
+          ])
+        : [[], [], [], []];
+
+    const threadIds = threads.map(({ id }) => id);
+    const [threadMessages, quotes] =
+      threadIds.length > 0
+        ? await Promise.all([
+            db
+              .select()
+              .from(threadMessage)
+              .where(inArray(threadMessage.threadId, threadIds)),
+            db
+              .select()
+              .from(quote)
+              .where(inArray(quote.childThreadId, threadIds)),
+          ])
+        : [[], []];
+
+    return {
+      exportedAt: new Date().toISOString(),
+      user: selectedUser,
+      chats: userChats,
+      messages,
+      votes,
+      streams,
+      threads,
+      threadMessages,
+      quotes,
+      documents,
+      suggestions,
+      providers,
+    };
+  } catch (_error) {
+    if (_error instanceof ChatbotError) {
+      throw _error;
+    }
+    throw new ChatbotError(
+      "bad_request:database",
+      "Failed to export user data"
+    );
+  }
+}
+
+export async function migrateUserData({
+  fromUserId,
+  toUserId,
+}: {
+  fromUserId: string;
+  toUserId: string;
+}) {
+  if (fromUserId === toUserId) {
+    return;
+  }
+
+  try {
+    await db.transaction(async (tx) => {
+      const existingTargetProviders = await tx
+        .select({ providerId: userProvider.providerId })
+        .from(userProvider)
+        .where(eq(userProvider.userId, toUserId));
+
+      const existingProviderIds = existingTargetProviders.map(
+        ({ providerId }) => providerId
+      );
+
+      if (existingProviderIds.length > 0) {
+        await tx
+          .delete(userProvider)
+          .where(
+            and(
+              eq(userProvider.userId, fromUserId),
+              inArray(userProvider.providerId, existingProviderIds)
+            )
+          );
+      }
+
+      await tx
+        .update(userProvider)
+        .set({ userId: toUserId, updatedAt: new Date() })
+        .where(eq(userProvider.userId, fromUserId));
+
+      await tx
+        .update(chat)
+        .set({ userId: toUserId })
+        .where(eq(chat.userId, fromUserId));
+
+      await tx
+        .update(document)
+        .set({ userId: toUserId })
+        .where(eq(document.userId, fromUserId));
+
+      await tx
+        .update(suggestion)
+        .set({ userId: toUserId })
+        .where(eq(suggestion.userId, fromUserId));
+    });
+  } catch (_error) {
+    throw new ChatbotError(
+      "bad_request:database",
+      "Failed to migrate user data"
     );
   }
 }
@@ -152,6 +339,24 @@ export async function deleteAllChatsByUserId({ userId }: { userId: string }) {
       "bad_request:database",
       "Failed to delete all chats by user id"
     );
+  }
+}
+
+export async function deleteUserById({ userId }: { userId: string }) {
+  try {
+    await deleteAllChatsByUserId({ userId });
+    await db.delete(userProvider).where(eq(userProvider.userId, userId));
+    await db.delete(suggestion).where(eq(suggestion.userId, userId));
+    await db.delete(document).where(eq(document.userId, userId));
+
+    const [deletedUser] = await db
+      .delete(user)
+      .where(eq(user.id, userId))
+      .returning({ id: user.id });
+
+    return deletedUser ?? null;
+  } catch (_error) {
+    throw new ChatbotError("bad_request:database", "Failed to delete user");
   }
 }
 

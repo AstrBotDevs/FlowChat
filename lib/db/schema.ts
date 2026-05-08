@@ -12,17 +12,23 @@ import {
   varchar,
 } from "drizzle-orm/pg-core";
 
-export const user = pgTable("User", {
-  id: uuid("id").primaryKey().notNull().defaultRandom(),
-  email: varchar("email", { length: 64 }).notNull(),
-  password: varchar("password", { length: 64 }),
-  name: text("name"),
-  emailVerified: boolean("emailVerified").notNull().default(false),
-  image: text("image"),
-  isAnonymous: boolean("isAnonymous").notNull().default(false),
-  createdAt: timestamp("createdAt").notNull().defaultNow(),
-  updatedAt: timestamp("updatedAt").notNull().defaultNow(),
-});
+export const user = pgTable(
+  "User",
+  {
+    id: uuid("id").primaryKey().notNull().defaultRandom(),
+    email: varchar("email", { length: 64 }).notNull(),
+    password: varchar("password", { length: 64 }),
+    name: text("name"),
+    emailVerified: boolean("emailVerified").notNull().default(false),
+    image: text("image"),
+    isAnonymous: boolean("isAnonymous").notNull().default(false),
+    createdAt: timestamp("createdAt").notNull().defaultNow(),
+    updatedAt: timestamp("updatedAt").notNull().defaultNow(),
+  },
+  (table) => ({
+    emailUnique: unique().on(table.email),
+  })
+);
 
 export type User = InferSelectModel<typeof user>;
 
@@ -162,10 +168,10 @@ export const userProvider = pgTable(
 export type UserProvider = InferSelectModel<typeof userProvider>;
 
 export {
-  thread,
-  quote,
-  threadMessage,
-  type Thread,
   type Quote,
+  quote,
+  type Thread,
   type ThreadMessage,
+  thread,
+  threadMessage,
 } from "./schema-thread";
