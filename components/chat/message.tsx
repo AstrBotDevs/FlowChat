@@ -2,10 +2,10 @@
 import type { UseChatHelpers } from "@ai-sdk/react";
 import { useCallback, useRef, useState } from "react";
 import useSWR from "swr";
+import { useTextSelection } from "@/hooks/use-text-selection";
 import type { Vote } from "@/lib/db/schema";
 import type { ChatMessage } from "@/lib/types";
 import { cn, fetcher, sanitizeText } from "@/lib/utils";
-import { useTextSelection } from "@/hooks/use-text-selection";
 import { MessageContent, MessageResponse } from "../ai-elements/message";
 import { Shimmer } from "../ai-elements/shimmer";
 import {
@@ -21,7 +21,10 @@ import { useDataStream } from "./data-stream-provider";
 import { DocumentToolResult } from "./document";
 import { DocumentPreview } from "./document-preview";
 import { FollowUpButton } from "./follow-up-button";
-import { FollowUpPopover, type FollowUpPopoverAnchor } from "./follow-up-popover";
+import {
+  FollowUpPopover,
+  type FollowUpPopoverAnchor,
+} from "./follow-up-popover";
 import { SparklesIcon } from "./icons";
 import { MessageActions } from "./message-actions";
 import { MessageReasoning } from "./message-reasoning";
@@ -54,7 +57,6 @@ const PurePreviewMessage = ({
   isLoading,
   setMessages: _setMessages,
   regenerate: _regenerate,
-  isReadonly,
   requiresScrollPadding: _requiresScrollPadding,
   onEdit,
   selectedChatModel,
@@ -66,7 +68,6 @@ const PurePreviewMessage = ({
   isLoading: boolean;
   setMessages: UseChatHelpers<ChatMessage>["setMessages"];
   regenerate: UseChatHelpers<ChatMessage>["regenerate"];
-  isReadonly: boolean;
   requiresScrollPadding: boolean;
   onEdit?: (message: ChatMessage) => void;
   selectedChatModel?: string;
@@ -96,7 +97,7 @@ const PurePreviewMessage = ({
   const [activePopover, setActivePopover] = useState<ActivePopoverState>(null);
 
   const { data: quotesData, mutate: mutateQuotes } = useSWR<QuoteWithRounds[]>(
-    isAssistant && !isReadonly
+    isAssistant
       ? `${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/api/quote?messageId=${message.id}`
       : null,
     fetcher,
@@ -106,10 +107,14 @@ const PurePreviewMessage = ({
   const quotes = quotesData ?? [];
 
   const handleFollowUp = useCallback(() => {
-    if (!selection) return;
+    if (!selection) {
+      return;
+    }
 
     const sel = window.getSelection();
-    if (!sel || sel.rangeCount === 0) return;
+    if (!sel || sel.rangeCount === 0) {
+      return;
+    }
 
     const range = sel.getRangeAt(0).cloneRange();
     sel.removeAllRanges();
@@ -355,13 +360,7 @@ const PurePreviewMessage = ({
         );
       }
 
-      return (
-        <DocumentPreview
-          isReadonly={isReadonly}
-          key={toolCallId}
-          result={part.output}
-        />
-      );
+      return <DocumentPreview key={toolCallId} result={part.output} />;
     }
 
     if (type === "tool-updateDocument") {
@@ -382,7 +381,6 @@ const PurePreviewMessage = ({
         <div className="relative" key={toolCallId}>
           <DocumentPreview
             args={{ ...part.output, isUpdate: true }}
-            isReadonly={isReadonly}
             result={part.output}
           />
         </div>
@@ -411,7 +409,6 @@ const PurePreviewMessage = ({
                     </div>
                   ) : (
                     <DocumentToolResult
-                      isReadonly={isReadonly}
                       result={part.output}
                       type="request-suggestions"
                     />
@@ -427,7 +424,7 @@ const PurePreviewMessage = ({
     return null;
   });
 
-  const actions = !isReadonly && (
+  const actions = (
     <MessageActions
       chatId={chatId}
       isLoading={isLoading}
@@ -438,7 +435,7 @@ const PurePreviewMessage = ({
     />
   );
 
-  const followUpOverlay = isAssistant && !isReadonly && (
+  const followUpOverlay = isAssistant && (
     <>
       {selection?.isActive && (
         <FollowUpButton

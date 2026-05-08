@@ -68,19 +68,18 @@ export async function POST(request: Request) {
   }
 
   try {
-    const { id, message, messages, selectedChatModel, selectedVisibilityType } =
-      requestBody;
+    const { id, message, messages, selectedChatModel } = requestBody;
 
     const [, session] = await Promise.all([
       checkBotId().catch(() => null),
       auth(),
     ]);
 
-    if (!session?.user) {
+    if (!session?.user?.id) {
       return new ChatbotError("unauthorized:chat").toResponse();
     }
 
-    const userId = session.user.id!;
+    const userId = session.user.id;
 
     const providers = await getUserProviders({ userId });
     if (providers.length === 0) {
@@ -121,9 +120,12 @@ export async function POST(request: Request) {
         id,
         userId,
         title: "New chat",
-        visibility: selectedVisibilityType,
       });
-      titlePromise = generateTitleFromUserMessage({ message, userId, modelId: chatModel });
+      titlePromise = generateTitleFromUserMessage({
+        message,
+        userId,
+        modelId: chatModel,
+      });
     }
 
     let uiMessages: ChatMessage[];

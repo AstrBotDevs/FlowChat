@@ -19,25 +19,16 @@ export async function GET(request: Request) {
   if (!chat) {
     return Response.json({
       messages: [],
-      visibility: "private",
       userId: null,
-      isReadonly: false,
     });
   }
 
-  if (
-    chat.visibility === "private" &&
-    (!session?.user || session.user.id !== chat.userId)
-  ) {
+  if (!session?.user || session.user.id !== chat.userId) {
     return Response.json({ error: "forbidden" }, { status: 403 });
   }
 
-  const isReadonly = !session?.user || session.user.id !== chat.userId;
-
   return Response.json({
     messages: convertToUIMessages(messages),
-    visibility: chat.visibility,
     userId: chat.userId,
-    isReadonly,
   });
 }

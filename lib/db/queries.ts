@@ -15,7 +15,6 @@ import {
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import type { ArtifactKind } from "@/components/chat/artifact";
-import type { VisibilityType } from "@/components/chat/visibility-selector";
 import { ChatbotError } from "../errors";
 import { generateUUID } from "../utils";
 import { deleteThreadDataByChatId } from "./queries-thread";
@@ -268,12 +267,10 @@ export async function saveChat({
   id,
   userId,
   title,
-  visibility,
 }: {
   id: string;
   userId: string;
   title: string;
-  visibility: VisibilityType;
 }) {
   try {
     return await db.insert(chat).values({
@@ -281,7 +278,6 @@ export async function saveChat({
       createdAt: new Date(),
       userId,
       title,
-      visibility,
     });
   } catch (_error) {
     throw new ChatbotError("bad_request:database", "Failed to save chat");
@@ -737,23 +733,6 @@ export async function deleteMessagesByChatIdAfterTimestamp({
     throw new ChatbotError(
       "bad_request:database",
       "Failed to delete messages by chat id after timestamp"
-    );
-  }
-}
-
-export async function updateChatVisibilityById({
-  chatId,
-  visibility,
-}: {
-  chatId: string;
-  visibility: "private" | "public";
-}) {
-  try {
-    return await db.update(chat).set({ visibility }).where(eq(chat.id, chatId));
-  } catch (_error) {
-    throw new ChatbotError(
-      "bad_request:database",
-      "Failed to update chat visibility by id"
     );
   }
 }

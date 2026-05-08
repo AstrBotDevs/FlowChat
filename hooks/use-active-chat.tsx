@@ -20,7 +20,6 @@ import { unstable_serialize } from "swr/infinite";
 import { useDataStream } from "@/components/chat/data-stream-provider";
 import { getChatHistoryPaginationKey } from "@/components/chat/sidebar-history";
 import { toast } from "@/components/chat/toast";
-import type { VisibilityType } from "@/components/chat/visibility-selector";
 import { useAutoResume } from "@/hooks/use-auto-resume";
 import { DEFAULT_CHAT_MODEL } from "@/lib/ai/models";
 import type { Vote } from "@/lib/db/schema";
@@ -39,8 +38,6 @@ type ActiveChatContextValue = {
   addToolApprovalResponse: UseChatHelpers<ChatMessage>["addToolApprovalResponse"];
   input: string;
   setInput: Dispatch<SetStateAction<string>>;
-  visibilityType: VisibilityType;
-  isReadonly: boolean;
   isLoading: boolean;
   votes: Vote[] | undefined;
   currentModelId: string;
@@ -90,9 +87,6 @@ export function ActiveChatProvider({ children }: { children: ReactNode }) {
   const initialMessages: ChatMessage[] = isNewChat
     ? []
     : (chatData?.messages ?? []);
-  const visibility: VisibilityType = isNewChat
-    ? "private"
-    : (chatData?.visibility ?? "private");
 
   const {
     messages,
@@ -142,7 +136,6 @@ export function ActiveChatProvider({ children }: { children: ReactNode }) {
               ? { messages: request.messages }
               : { message: lastMessage }),
             selectedChatModel: currentModelIdRef.current,
-            selectedVisibilityType: visibility,
             ...request.body,
           },
         };
@@ -229,10 +222,8 @@ export function ActiveChatProvider({ children }: { children: ReactNode }) {
     setMessages,
   });
 
-  const isReadonly = isNewChat ? false : (chatData?.isReadonly ?? false);
-
   const { data: votes } = useSWR<Vote[]>(
-    !isReadonly && messages.length >= 2
+    messages.length >= 2
       ? `${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/api/vote?chatId=${chatId}`
       : null,
     fetcher,
@@ -251,8 +242,6 @@ export function ActiveChatProvider({ children }: { children: ReactNode }) {
       addToolApprovalResponse,
       input,
       setInput,
-      visibilityType: visibility,
-      isReadonly,
       isLoading: !isNewChat && isLoading,
       votes,
       currentModelId,
@@ -268,8 +257,6 @@ export function ActiveChatProvider({ children }: { children: ReactNode }) {
       regenerate,
       addToolApprovalResponse,
       input,
-      visibility,
-      isReadonly,
       isNewChat,
       isLoading,
       votes,

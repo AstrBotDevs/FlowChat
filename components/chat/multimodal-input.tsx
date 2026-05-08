@@ -62,7 +62,6 @@ import {
   slashCommands,
 } from "./slash-commands";
 import { SuggestedActions } from "./suggested-actions";
-import type { VisibilityType } from "./visibility-selector";
 
 function setCookie(name: string, value: string) {
   const maxAge = 60 * 60 * 24 * 365;
@@ -82,7 +81,6 @@ function PureMultimodalInput({
   setMessages,
   sendMessage,
   className,
-  selectedVisibilityType,
   selectedModelId,
   onModelChange,
   editingMessage,
@@ -102,7 +100,6 @@ function PureMultimodalInput({
     | UseChatHelpers<ChatMessage>["sendMessage"]
     | (() => Promise<void>);
   className?: string;
-  selectedVisibilityType: VisibilityType;
   selectedModelId: string;
   onModelChange?: (modelId: string) => void;
   editingMessage?: ChatMessage | null;
@@ -405,11 +402,7 @@ function PureMultimodalInput({
         messages.length === 0 &&
         attachments.length === 0 &&
         uploadQueue.length === 0 && (
-          <SuggestedActions
-            chatId={chatId}
-            selectedVisibilityType={selectedVisibilityType}
-            sendMessage={sendMessage}
-          />
+          <SuggestedActions chatId={chatId} sendMessage={sendMessage} />
         )}
 
       <input
@@ -568,7 +561,11 @@ function PureMultimodalInput({
                   : "bg-muted text-muted-foreground/25 cursor-not-allowed"
               )}
               data-testid="send-button"
-              disabled={!input.trim() || uploadQueue.length > 0 || !hasConfiguredProviders}
+              disabled={
+                !input.trim() ||
+                uploadQueue.length > 0 ||
+                !hasConfiguredProviders
+              }
               status={status}
               variant="secondary"
             >
@@ -591,9 +588,6 @@ export const MultimodalInput = memo(
       return false;
     }
     if (!equal(prevProps.attachments, nextProps.attachments)) {
-      return false;
-    }
-    if (prevProps.selectedVisibilityType !== nextProps.selectedVisibilityType) {
       return false;
     }
     if (prevProps.selectedModelId !== nextProps.selectedModelId) {
@@ -746,9 +740,7 @@ function PureModelSelectorCompact({
           {capabilities?.[model.id]?.tools && (
             <WrenchIcon className="size-3.5" />
           )}
-          {capabilities?.[model.id]?.vision && (
-            <EyeIcon className="size-3.5" />
-          )}
+          {capabilities?.[model.id]?.vision && <EyeIcon className="size-3.5" />}
           {capabilities?.[model.id]?.reasoning && (
             <BrainIcon className="size-3.5" />
           )}
@@ -775,22 +767,22 @@ function PureModelSelectorCompact({
       <ModelSelectorContent>
         <ModelSelectorInput placeholder="Search models..." />
         <ModelSelectorList>
-          {availableModels.length > 0
-            ? groupByProvider(availableModels).map(([prov, models]) => (
-                <ModelSelectorGroup
-                  heading={KNOWN_PROVIDERS[prov]?.name ?? prov}
-                  key={prov}
-                >
-                  {models.map((m) => renderModelItem(m, true))}
-                </ModelSelectorGroup>
-              ))
-            : (
-              <ModelSelectorGroup heading="No providers configured">
-                <div className="px-3 py-2 text-[12px] text-muted-foreground">
-                  Go to Settings to add an API key
-                </div>
+          {availableModels.length > 0 ? (
+            groupByProvider(availableModels).map(([prov, models]) => (
+              <ModelSelectorGroup
+                heading={KNOWN_PROVIDERS[prov]?.name ?? prov}
+                key={prov}
+              >
+                {models.map((m) => renderModelItem(m, true))}
               </ModelSelectorGroup>
-            )}
+            ))
+          ) : (
+            <ModelSelectorGroup heading="No providers configured">
+              <div className="px-3 py-2 text-[12px] text-muted-foreground">
+                Go to Settings to add an API key
+              </div>
+            </ModelSelectorGroup>
+          )}
 
           {unavailableModels.length > 0 && (
             <ModelSelectorGroup
@@ -804,7 +796,8 @@ function PureModelSelectorCompact({
                   }}
                   type="button"
                 >
-                  {showMore ? "Hide" : "Show"} more models ({unavailableModels.length})
+                  {showMore ? "Hide" : "Show"} more models (
+                  {unavailableModels.length})
                 </button>
               }
             >

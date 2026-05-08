@@ -17,7 +17,6 @@ type MessagesProps = {
   messages: ChatMessage[];
   setMessages: UseChatHelpers<ChatMessage>["setMessages"];
   regenerate: UseChatHelpers<ChatMessage>["regenerate"];
-  isReadonly: boolean;
   isArtifactVisible: boolean;
   isLoading?: boolean;
   selectedModelId: string;
@@ -32,7 +31,6 @@ function PureMessages({
   messages,
   setMessages,
   regenerate,
-  isReadonly,
   isArtifactVisible,
   isLoading,
   selectedModelId,
@@ -82,7 +80,6 @@ function PureMessages({
               isLoading={
                 status === "streaming" && messages.length - 1 === index
               }
-              isReadonly={isReadonly}
               key={message.id}
               message={message}
               onEdit={onEditMessage}
