@@ -442,7 +442,7 @@ export function FollowUpPopover({
       <div className="border-t border-border/40 p-2">
         <div className="flex items-end gap-2">
           <textarea
-            className="max-h-20 min-h-[36px] flex-1 resize-none rounded-lg border border-border/40 bg-muted/30 px-3 py-2 text-xs leading-relaxed text-foreground placeholder:text-muted-foreground/60 focus:border-border focus:outline-none"
+            className="max-h-20 min-h-[36px] flex-1 resize-none rounded-lg border border-border/40 bg-muted/30 px-3 py-2 text-xs leading-relaxed text-foreground placeholder:text-muted-foreground/60 focus:outline-none"
             disabled={status === "streaming"}
             onChange={(e) => setInputValue(e.target.value)}
             onKeyDown={handleInputKeyDown}
