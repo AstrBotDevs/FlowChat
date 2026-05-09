@@ -16,7 +16,9 @@ function isInsideCodeBlock(node: Node): boolean {
   while (current) {
     if (current instanceof HTMLElement) {
       const tag = current.tagName.toLowerCase();
-      if (tag === "pre" || tag === "code") return true;
+      if (tag === "pre" || tag === "code") {
+        return true;
+      }
     }
     current = current.parentNode;
   }
@@ -35,10 +37,14 @@ export function useTextSelection(
 
   useEffect(() => {
     const container = containerRef.current;
-    if (!container) return;
+    if (!container) {
+      return;
+    }
 
     const handleMouseUp = () => {
-      if (timerRef.current) clearTimeout(timerRef.current);
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+      }
 
       timerRef.current = setTimeout(() => {
         const sel = window.getSelection();
@@ -89,7 +95,9 @@ export function useTextSelection(
     };
 
     const handleScroll = () => {
-      if (selection?.isActive) clear();
+      if (selection?.isActive) {
+        clear();
+      }
     };
 
     container.addEventListener("mouseup", handleMouseUp);
@@ -100,7 +108,9 @@ export function useTextSelection(
       container.removeEventListener("mouseup", handleMouseUp);
       document.removeEventListener("mousedown", handleMouseDown);
       document.removeEventListener("scroll", handleScroll, true);
-      if (timerRef.current) clearTimeout(timerRef.current);
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+      }
     };
   }, [containerRef, selection?.isActive, clear]);
 

@@ -13,10 +13,11 @@ import { createResumableStreamContext } from "resumable-stream";
 import { auth, type UserType } from "@/app/(auth)/auth";
 import { entitlementsByUserType } from "@/lib/ai/entitlements";
 import {
-  DEFAULT_CHAT_MODEL,
-  getAllModels,
-  getCapabilitiesFromModels,
-} from "@/lib/ai/models";
+  getSelectionModelId,
+  legacyModelIdToSelection,
+  type ModelSelection,
+} from "@/lib/ai/model-selection";
+import { getAllModels, getCapabilitiesFromModels } from "@/lib/ai/models";
 import { type RequestHints, systemPrompt } from "@/lib/ai/prompts";
 import { getLanguageModel } from "@/lib/ai/providers";
 import { createDocument } from "@/lib/ai/tools/create-document";
@@ -68,7 +69,8 @@ export async function POST(request: Request) {
   }
 
   try {
-    const { id, message, messages, selectedChatModel } = requestBody;
+    const { id, message, messages, selectedChatModel, modelSelection } =
+      requestBody;
 
     const [, session] = await Promise.all([
       checkBotId().catch(() => null),
@@ -89,7 +91,10 @@ export async function POST(request: Request) {
       ).toResponse();
     }
 
-    const chatModel = selectedChatModel || DEFAULT_CHAT_MODEL;
+    const selectedModel: ModelSelection =
+      modelSelection ??
+      legacyModelIdToSelection(selectedChatModel ?? "deepseek/deepseek-v3.2");
+    const chatModel = getSelectionModelId(selectedModel);
 
     await checkIpRateLimit(ipAddress(request));
 
@@ -124,7 +129,7 @@ export async function POST(request: Request) {
       titlePromise = generateTitleFromUserMessage({
         message,
         userId,
-        modelId: chatModel,
+        modelSelection: selectedModel,
       });
     }
 
@@ -202,7 +207,7 @@ export async function POST(request: Request) {
       originalMessages: isToolApprovalFlow ? uiMessages : undefined,
       execute: async ({ writer: dataStream }) => {
         const result = streamText({
-          model: await getLanguageModel(chatModel, userId),
+          model: await getLanguageModel(selectedModel, userId),
           system: systemPrompt({ requestHints, supportsTools }),
           messages: modelMessages,
           stopWhen: stepCountIs(5),
@@ -221,18 +226,18 @@ export async function POST(request: Request) {
             createDocument: createDocument({
               session,
               dataStream,
-              modelId: chatModel,
+              modelSelection: selectedModel,
             }),
             editDocument: editDocument({ dataStream, session }),
             updateDocument: updateDocument({
               session,
               dataStream,
-              modelId: chatModel,
+              modelSelection: selectedModel,
             }),
             requestSuggestions: requestSuggestions({
               session,
               dataStream,
-              modelId: chatModel,
+              modelSelection: selectedModel,
             }),
           },
           experimental_telemetry: {

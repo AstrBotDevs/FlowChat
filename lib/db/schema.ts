@@ -150,13 +150,25 @@ export const userProvider = pgTable(
       .notNull()
       .references(() => user.id),
     providerId: varchar("providerId", { length: 64 }).notNull(),
+    displayName: text("displayName"),
     apiKey: text("apiKey").notNull(),
     baseUrl: text("baseUrl"),
     providerType: varchar("providerType", {
-      enum: ["openai-compatible", "anthropic", "google"],
+      enum: [
+        "openai",
+        "anthropic",
+        "google",
+        "deepseek",
+        "moonshotai",
+        "alibaba",
+        "xai",
+        "gateway",
+        "openai-compatible",
+      ],
     })
       .notNull()
       .default("openai-compatible"),
+    models: json("models").$type<string[]>().notNull().default([]),
     createdAt: timestamp("createdAt").notNull().defaultNow(),
     updatedAt: timestamp("updatedAt").notNull().defaultNow(),
   },

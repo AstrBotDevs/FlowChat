@@ -30,8 +30,8 @@ export function ChatShell() {
     setInput,
     isLoading,
     votes,
-    currentModelId,
-    setCurrentModelId,
+    currentModelSelection,
+    setCurrentModelSelection,
   } = useActiveChat();
 
   const [editingMessage, setEditingMessage] = useState<ChatMessage | null>(
@@ -73,6 +73,7 @@ export function ChatShell() {
               isArtifactVisible={isArtifactVisible}
               isLoading={isLoading}
               messages={messages}
+              modelSelection={currentModelSelection}
               onEditMessage={(msg) => {
                 const text = msg.parts
                   ?.filter((p) => p.type === "text")
@@ -82,7 +83,6 @@ export function ChatShell() {
                 setEditingMessage(msg);
               }}
               regenerate={regenerate}
-              selectedModelId={currentModelId}
               setMessages={setMessages}
               status={status}
               votes={votes}
@@ -96,12 +96,12 @@ export function ChatShell() {
                 input={input}
                 isLoading={isLoading}
                 messages={messages}
+                modelSelection={currentModelSelection}
                 onCancelEdit={() => {
                   setEditingMessage(null);
                   setInput("");
                 }}
-                onModelChange={setCurrentModelId}
-                selectedModelId={currentModelId}
+                onModelChange={setCurrentModelSelection}
                 sendMessage={
                   editingMessage
                     ? async () => {
@@ -134,7 +134,7 @@ export function ChatShell() {
           input={input}
           messages={messages}
           regenerate={regenerate}
-          selectedModelId={currentModelId}
+          selectedModelId={currentModelSelection.modelId}
           sendMessage={sendMessage}
           setAttachments={setAttachments}
           setInput={setInput}

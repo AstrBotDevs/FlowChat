@@ -15,6 +15,13 @@
       "when": 1778231400000,
       "tag": "0002_user_email_unique",
       "breakpoints": false
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1778288400000,
+      "tag": "0003_provider_sources",
+      "breakpoints": false
     }
   ]
 }

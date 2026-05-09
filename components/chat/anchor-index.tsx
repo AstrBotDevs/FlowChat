@@ -24,7 +24,9 @@ export function AnchorIndex({
 }) {
   const [expanded, setExpanded] = useState(false);
 
-  if (quotes.length < 2) return null;
+  if (quotes.length < 2) {
+    return null;
+  }
 
   return (
     <div className="mt-2 rounded-lg border border-border/30 bg-muted/20">
@@ -53,10 +55,7 @@ export function AnchorIndex({
           >
             <div className="flex flex-col gap-1 px-3 pb-2">
               {quotes.map((q) => (
-                <div
-                  className="flex items-center gap-2 text-xs"
-                  key={q.id}
-                >
+                <div className="flex items-center gap-2 text-xs" key={q.id}>
                   <button
                     className="min-w-0 flex-1 truncate text-left text-foreground/80 transition-colors hover:text-primary"
                     onClick={() => onJump(q.id)}

@@ -1,11 +1,17 @@
 import { z } from "zod";
 import { auth } from "@/app/(auth)/auth";
 import {
+  DIRECT_PROVIDER_IDS,
+  GATEWAY_PROVIDER_ID,
+  isDirectProviderId,
+} from "@/lib/ai/provider-registry";
+import {
   deleteUserProvider,
   getUserProviders,
   upsertUserProvider,
 } from "@/lib/db/queries";
 import { ChatbotError } from "@/lib/errors";
+import { generateUUID } from "@/lib/utils";
 
 function maskApiKey(key: string): string {
   if (key.length <= 8) {
@@ -25,8 +31,10 @@ export async function GET() {
   const masked = providers.map((p) => ({
     id: p.id,
     providerId: p.providerId,
+    displayName: p.displayName,
     providerType: p.providerType,
     baseUrl: p.baseUrl,
+    models: p.models ?? [],
     apiKeyMasked: maskApiKey(p.apiKey),
     createdAt: p.createdAt,
     updatedAt: p.updatedAt,
@@ -35,12 +43,73 @@ export async function GET() {
   return Response.json(masked);
 }
 
+const providerTypeSchema = z.enum([
+  "openai",
+  "anthropic",
+  "google",
+  "deepseek",
+  "moonshotai",
+  "alibaba",
+  "xai",
+  "gateway",
+  "openai-compatible",
+]);
+
 const upsertSchema = z.object({
-  providerId: z.string().min(1).max(64),
+  providerId: z.string().min(1).max(64).optional(),
+  displayName: z.string().min(1).max(80).optional(),
   apiKey: z.string().min(1),
   baseUrl: z.string().url().nullable().optional(),
-  providerType: z.enum(["openai-compatible", "anthropic", "google"]),
+  manualModels: z.array(z.string().min(1).max(200)).optional(),
+  providerType: providerTypeSchema,
 });
+
+function normalizeModelIds(models: string[]): string[] {
+  return Array.from(
+    new Set(models.map((model) => model.trim()).filter(Boolean))
+  ).sort((a, b) => a.localeCompare(b));
+}
+
+async function discoverOpenAICompatibleModels({
+  baseUrl,
+  apiKey,
+}: {
+  baseUrl: string;
+  apiKey: string;
+}): Promise<{ models: string[]; warning?: string }> {
+  try {
+    const res = await fetch(`${baseUrl.replace(/\/$/, "")}/models`, {
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+      },
+      signal: AbortSignal.timeout(10_000),
+    });
+
+    if (!res.ok) {
+      return {
+        models: [],
+        warning: `Model discovery failed with ${res.status}`,
+      };
+    }
+
+    const json = await res.json();
+    const models = Array.isArray(json.data)
+      ? json.data
+          .map((model: { id?: unknown }) =>
+            typeof model.id === "string" ? model.id : null
+          )
+          .filter((id: string | null): id is string => Boolean(id))
+      : [];
+
+    return { models: normalizeModelIds(models) };
+  } catch (error) {
+    return {
+      models: [],
+      warning:
+        error instanceof Error ? error.message : "Model discovery failed",
+    };
+  }
+}
 
 export async function POST(request: Request) {
   const session = await auth();
@@ -56,20 +125,66 @@ export async function POST(request: Request) {
     return new ChatbotError("bad_request:api").toResponse();
   }
 
+  let providerId = body.providerId;
+  let baseUrl = body.baseUrl ?? null;
+  let displayName = body.displayName ?? null;
+  let models = normalizeModelIds(body.manualModels ?? []);
+  let warning: string | undefined;
+
+  if (body.providerType === "openai-compatible") {
+    if (!body.baseUrl || !body.displayName) {
+      return new ChatbotError(
+        "bad_request:api",
+        "Custom providers require a name and base URL"
+      ).toResponse();
+    }
+
+    providerId = providerId?.startsWith("custom_")
+      ? providerId
+      : `custom_${generateUUID().slice(0, 8)}`;
+    const discovered = await discoverOpenAICompatibleModels({
+      baseUrl: body.baseUrl,
+      apiKey: body.apiKey,
+    });
+    models = normalizeModelIds([...models, ...discovered.models]);
+    warning = discovered.warning;
+  } else if (body.providerType === "gateway") {
+    providerId = GATEWAY_PROVIDER_ID;
+    baseUrl = null;
+    displayName = null;
+    models = [];
+  } else {
+    if (!providerId || !isDirectProviderId(providerId)) {
+      return new ChatbotError("bad_request:api").toResponse();
+    }
+    if (!DIRECT_PROVIDER_IDS.includes(body.providerType)) {
+      return new ChatbotError("bad_request:api").toResponse();
+    }
+    providerId = body.providerType;
+    baseUrl = null;
+    displayName = null;
+    models = [];
+  }
+
   const result = await upsertUserProvider({
     userId: session.user.id,
-    providerId: body.providerId,
+    providerId,
+    displayName,
     apiKey: body.apiKey,
-    baseUrl: body.baseUrl ?? null,
+    baseUrl,
     providerType: body.providerType,
+    models,
   });
 
   return Response.json({
     id: result[0].id,
     providerId: result[0].providerId,
+    displayName: result[0].displayName,
     providerType: result[0].providerType,
     baseUrl: result[0].baseUrl,
+    models: result[0].models ?? [],
     apiKeyMasked: maskApiKey(result[0].apiKey),
+    warning,
   });
 }
 

@@ -143,10 +143,7 @@ export function AppSidebar({ user }: { user: User | undefined }) {
                 className="rounded-lg text-sidebar-foreground/60 transition-colors duration-150 hover:text-sidebar-foreground"
                 tooltip="Settings"
               >
-                <Link
-                  href="/settings"
-                  onClick={() => setOpenMobile(false)}
-                >
+                <Link href="/settings" onClick={() => setOpenMobile(false)}>
                   <SettingsIcon className="size-4" />
                   <span className="text-[13px]">Settings</span>
                 </Link>

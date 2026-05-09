@@ -1,6 +1,6 @@
 "use client";
 
-import { motion, AnimatePresence } from "framer-motion";
+import { AnimatePresence, motion } from "framer-motion";
 import { MessageSquareQuote } from "lucide-react";
 import { createPortal } from "react-dom";
 

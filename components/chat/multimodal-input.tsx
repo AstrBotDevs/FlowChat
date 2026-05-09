@@ -21,6 +21,7 @@ import {
   type SetStateAction,
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -38,12 +39,17 @@ import {
   ModelSelectorName,
   ModelSelectorTrigger,
 } from "@/components/ai-elements/model-selector";
+import type { ModelSelection } from "@/lib/ai/model-selection";
 import {
   type ChatModel,
   DEFAULT_CHAT_MODEL,
   type ModelCapabilities,
 } from "@/lib/ai/models";
-import { KNOWN_PROVIDERS } from "@/lib/ai/provider-registry";
+import {
+  DIRECT_PROVIDER_IDS,
+  GATEWAY_PROVIDER_ID,
+  KNOWN_PROVIDERS,
+} from "@/lib/ai/provider-registry";
 import type { Attachment, ChatMessage } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import {
@@ -81,7 +87,7 @@ function PureMultimodalInput({
   setMessages,
   sendMessage,
   className,
-  selectedModelId,
+  modelSelection,
   onModelChange,
   editingMessage,
   onCancelEdit,
@@ -100,8 +106,8 @@ function PureMultimodalInput({
     | UseChatHelpers<ChatMessage>["sendMessage"]
     | (() => Promise<void>);
   className?: string;
-  selectedModelId: string;
-  onModelChange?: (modelId: string) => void;
+  modelSelection: ModelSelection;
+  onModelChange?: (selection: ModelSelection) => void;
   editingMessage?: ChatMessage | null;
   onCancelEdit?: () => void;
   isLoading?: boolean;
@@ -541,12 +547,12 @@ function PureMultimodalInput({
           <PromptInputTools>
             <AttachmentsButton
               fileInputRef={fileInputRef}
-              selectedModelId={selectedModelId}
+              selectedModelId={modelSelection.modelId}
               status={status}
             />
             <ModelSelectorCompact
               onModelChange={onModelChange}
-              selectedModelId={selectedModelId}
+              selectedSelection={modelSelection}
             />
           </PromptInputTools>
 
@@ -561,11 +567,7 @@ function PureMultimodalInput({
                   : "bg-muted text-muted-foreground/25 cursor-not-allowed"
               )}
               data-testid="send-button"
-              disabled={
-                !input.trim() ||
-                uploadQueue.length > 0 ||
-                !hasConfiguredProviders
-              }
+              disabled={!input.trim() || uploadQueue.length > 0}
               status={status}
               variant="secondary"
             >
@@ -590,7 +592,7 @@ export const MultimodalInput = memo(
     if (!equal(prevProps.attachments, nextProps.attachments)) {
       return false;
     }
-    if (prevProps.selectedModelId !== nextProps.selectedModelId) {
+    if (prevProps.modelSelection !== nextProps.modelSelection) {
       return false;
     }
     if (prevProps.editingMessage !== nextProps.editingMessage) {
@@ -649,12 +651,30 @@ function PureAttachmentsButton({
 
 const AttachmentsButton = memo(PureAttachmentsButton);
 
+type SavedProvider = {
+  providerId: string;
+  displayName: string | null;
+  providerType: string;
+  baseUrl: string | null;
+  models: string[];
+};
+
+type SelectableModel = {
+  key: string;
+  selection: ModelSelection;
+  modelId: string;
+  name: string;
+  provider: string;
+  sourceLabel: string;
+  logoProvider: string;
+};
+
 function PureModelSelectorCompact({
-  selectedModelId,
+  selectedSelection,
   onModelChange,
 }: {
-  selectedModelId: string;
-  onModelChange?: (modelId: string) => void;
+  selectedSelection: ModelSelection;
+  onModelChange?: (selection: ModelSelection) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [showMore, setShowMore] = useState(false);
@@ -672,28 +692,140 @@ function PureModelSelectorCompact({
   const capabilities: Record<string, ModelCapabilities> | undefined =
     modelsData?.capabilities;
   const allModels: ChatModel[] = modelsData?.models ?? [];
-  const configuredProviders: string[] = (providersData ?? []).map(
-    (p: { providerId: string }) => p.providerId
-  );
-  const configuredSet = new Set(configuredProviders);
+  const providers: SavedProvider[] = providersData ?? [];
+  const { availableModels, unavailableModels } = useMemo(() => {
+    const gatewayConfigured = providers.some(
+      (provider) => provider.providerId === GATEWAY_PROVIDER_ID
+    );
+    const directProviderIds = new Set(
+      providers
+        .filter((provider) =>
+          DIRECT_PROVIDER_IDS.includes(
+            provider.providerId as (typeof DIRECT_PROVIDER_IDS)[number]
+          )
+        )
+        .map((provider) => provider.providerId)
+    );
+    const customProviders = providers.filter(
+      (provider) => provider.providerType === "openai-compatible"
+    );
+    const modelNameById = new Map(
+      allModels.map((model) => [model.id, model.name])
+    );
+
+    const directModels: SelectableModel[] = allModels
+      .filter((model) => directProviderIds.has(model.provider))
+      .map((model) => ({
+        key: `direct:${model.provider}:${model.id}`,
+        selection: {
+          source: "direct",
+          providerId: model.provider,
+          modelId: model.id,
+        },
+        modelId: model.id,
+        name: model.name,
+        provider: model.provider,
+        sourceLabel: "Direct",
+        logoProvider: model.id.split("/")[0],
+      }));
+
+    const gatewayModels: SelectableModel[] = gatewayConfigured
+      ? allModels.map((model) => ({
+          key: `gateway:${model.id}`,
+          selection: {
+            source: "gateway",
+            modelId: model.id,
+          },
+          modelId: model.id,
+          name: model.name,
+          provider: model.provider,
+          sourceLabel: "Gateway",
+          logoProvider: model.id.split("/")[0],
+        }))
+      : [];
+
+    const customModels: SelectableModel[] = customProviders.flatMap(
+      (provider) =>
+        (provider.models ?? []).map((modelId) => {
+          const [prefix] = modelId.split("/");
+          const inferredProvider =
+            prefix && prefix !== modelId ? prefix : provider.providerId;
+          return {
+            key: `custom:${provider.providerId}:${modelId}`,
+            selection: {
+              source: "custom" as const,
+              providerId: provider.providerId,
+              modelId,
+            },
+            modelId,
+            name:
+              modelNameById.get(modelId) ?? modelId.split("/").pop() ?? modelId,
+            provider: inferredProvider,
+            sourceLabel: provider.displayName ?? "Custom",
+            logoProvider: inferredProvider,
+          };
+        })
+    );
+
+    const available = [...directModels, ...gatewayModels, ...customModels];
+    const unavailable: SelectableModel[] = allModels
+      .filter(
+        (model) =>
+          !directProviderIds.has(model.provider) &&
+          !gatewayConfigured &&
+          !customModels.some((customModel) => customModel.modelId === model.id)
+      )
+      .map((model) => ({
+        key: `unavailable:${model.id}`,
+        selection: {
+          source: "direct",
+          providerId: model.provider,
+          modelId: model.id,
+        },
+        modelId: model.id,
+        name: model.name,
+        provider: model.provider,
+        sourceLabel: "Locked",
+        logoProvider: model.id.split("/")[0],
+      }));
+
+    return { availableModels: available, unavailableModels: unavailable };
+  }, [allModels, providers]);
 
   const selectedModel =
-    allModels.find((m) => m.id === selectedModelId) ??
-    allModels.find((m) => m.id === DEFAULT_CHAT_MODEL) ??
-    allModels[0];
+    availableModels.find(
+      (model) => model.key === getModelSelectionKey(selectedSelection)
+    ) ??
+    availableModels.find(
+      (model) => model.modelId === selectedSelection.modelId
+    ) ??
+    availableModels.find((model) => model.modelId === DEFAULT_CHAT_MODEL) ??
+    availableModels[0];
 
-  const displayName = selectedModel?.name ?? selectedModelId.split("/").pop();
-  const [provider] = (selectedModel?.id ?? selectedModelId).split("/");
+  const displayName =
+    selectedModel?.name ?? selectedSelection.modelId.split("/").pop();
+  const provider =
+    selectedModel?.logoProvider ?? selectedSelection.modelId.split("/")[0];
 
-  const availableModels = allModels.filter((m) =>
-    configuredSet.has(m.provider)
-  );
-  const unavailableModels = allModels.filter(
-    (m) => !configuredSet.has(m.provider)
-  );
+  useEffect(() => {
+    if (availableModels.length === 0) {
+      return;
+    }
+    if (
+      availableModels.some(
+        (model) => model.key === getModelSelectionKey(selectedSelection)
+      )
+    ) {
+      return;
+    }
+    onModelChange?.(
+      availableModels.find((model) => model.modelId === DEFAULT_CHAT_MODEL)
+        ?.selection ?? availableModels[0].selection
+    );
+  }, [availableModels, selectedSelection, onModelChange]);
 
-  const groupByProvider = (models: ChatModel[]) => {
-    const grouped: Record<string, ChatModel[]> = {};
+  const groupByProvider = (models: SelectableModel[]) => {
+    const grouped: Record<string, SelectableModel[]> = {};
     for (const model of models) {
       if (!grouped[model.provider]) {
         grouped[model.provider] = [];
@@ -703,17 +835,16 @@ function PureModelSelectorCompact({
     return Object.entries(grouped).sort(([a], [b]) => a.localeCompare(b));
   };
 
-  const renderModelItem = (model: ChatModel, available: boolean) => {
-    const logoProvider = model.id.split("/")[0];
+  const renderModelItem = (model: SelectableModel, available: boolean) => {
     return (
       <ModelSelectorItem
         className={cn(
           "flex w-full",
-          model.id === selectedModel?.id &&
+          model.key === selectedModel?.key &&
             "border-b border-dashed border-foreground/50",
           !available && "opacity-40 cursor-default"
         )}
-        key={model.id}
+        key={model.key}
         onSelect={() => {
           if (!available) {
             toast(
@@ -721,8 +852,8 @@ function PureModelSelectorCompact({
             );
             return;
           }
-          onModelChange?.(model.id);
-          setCookie("chat-model", model.id);
+          onModelChange?.(model.selection);
+          setCookie("chat-model-selection", JSON.stringify(model.selection));
           setOpen(false);
           setTimeout(() => {
             document
@@ -732,16 +863,21 @@ function PureModelSelectorCompact({
               ?.focus();
           }, 50);
         }}
-        value={model.id}
+        value={model.key}
       >
-        <ModelSelectorLogo provider={logoProvider} />
+        <ModelSelectorLogo provider={model.logoProvider} />
         <ModelSelectorName>{model.name}</ModelSelectorName>
         <div className="ml-auto flex items-center gap-2 text-foreground/70">
-          {capabilities?.[model.id]?.tools && (
+          <span className="rounded-md bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+            {model.sourceLabel}
+          </span>
+          {capabilities?.[model.modelId]?.tools && (
             <WrenchIcon className="size-3.5" />
           )}
-          {capabilities?.[model.id]?.vision && <EyeIcon className="size-3.5" />}
-          {capabilities?.[model.id]?.reasoning && (
+          {capabilities?.[model.modelId]?.vision && (
+            <EyeIcon className="size-3.5" />
+          )}
+          {capabilities?.[model.modelId]?.reasoning && (
             <BrainIcon className="size-3.5" />
           )}
           {!available && (
@@ -819,6 +955,13 @@ function PureModelSelectorCompact({
 }
 
 const ModelSelectorCompact = memo(PureModelSelectorCompact);
+
+function getModelSelectionKey(selection: ModelSelection) {
+  if (selection.source === "gateway") {
+    return `gateway:${selection.modelId}`;
+  }
+  return `${selection.source}:${selection.providerId}:${selection.modelId}`;
+}
 
 function PureStopButton({
   stop,

@@ -1,7 +1,6 @@
 import { z } from "zod";
 import { auth } from "@/app/(auth)/auth";
 import { getUserProviderByProviderId } from "@/lib/db/queries";
-import { KNOWN_PROVIDERS } from "@/lib/ai/provider-registry";
 import { ChatbotError } from "@/lib/errors";
 
 const testSchema = z.object({
@@ -39,33 +38,59 @@ export async function POST(request: Request) {
     const headers: Record<string, string> = {};
 
     switch (config.providerType) {
+      case "openai": {
+        testUrl = "https://api.openai.com/v1/models";
+        headers.Authorization = `Bearer ${config.apiKey}`;
+        break;
+      }
       case "anthropic": {
-        testUrl = config.baseUrl
-          ? `${config.baseUrl.replace(/\/$/, "")}/v1/models`
-          : "https://api.anthropic.com/v1/models";
+        testUrl = "https://api.anthropic.com/v1/models";
         headers["x-api-key"] = config.apiKey;
         headers["anthropic-version"] = "2023-06-01";
         break;
       }
       case "google": {
-        const base = config.baseUrl
-          ? config.baseUrl.replace(/\/$/, "")
-          : "https://generativelanguage.googleapis.com";
-        testUrl = `${base}/v1beta/models?key=${config.apiKey}`;
+        testUrl = `https://generativelanguage.googleapis.com/v1beta/models?key=${config.apiKey}`;
         break;
       }
-      case "openai-compatible":
+      case "deepseek": {
+        testUrl = "https://api.deepseek.com/v1/models";
+        headers.Authorization = `Bearer ${config.apiKey}`;
+        break;
+      }
+      case "moonshotai": {
+        testUrl = "https://api.moonshot.cn/v1/models";
+        headers.Authorization = `Bearer ${config.apiKey}`;
+        break;
+      }
+      case "alibaba": {
+        testUrl = "https://dashscope.aliyuncs.com/compatible-mode/v1/models";
+        headers.Authorization = `Bearer ${config.apiKey}`;
+        break;
+      }
+      case "xai": {
+        testUrl = "https://api.x.ai/v1/models";
+        headers.Authorization = `Bearer ${config.apiKey}`;
+        break;
+      }
+      case "gateway": {
+        testUrl = "https://ai-gateway.vercel.sh/v1/models";
+        headers.Authorization = `Bearer ${config.apiKey}`;
+        break;
+      }
       default: {
-        const baseURL =
-          config.baseUrl ?? KNOWN_PROVIDERS[body.providerId]?.defaultBaseUrl;
+        const baseURL = config.baseUrl;
         if (!baseURL) {
           return Response.json(
-            { success: false, error: "No base URL configured for this provider" },
+            {
+              success: false,
+              error: "No base URL configured for this provider",
+            },
             { status: 400 }
           );
         }
         testUrl = `${baseURL.replace(/\/$/, "")}/models`;
-        headers["Authorization"] = `Bearer ${config.apiKey}`;
+        headers.Authorization = `Bearer ${config.apiKey}`;
         break;
       }
     }
@@ -89,11 +114,7 @@ export async function POST(request: Request) {
       { status: 200 }
     );
   } catch (err) {
-    const message =
-      err instanceof Error ? err.message : "Connection failed";
-    return Response.json(
-      { success: false, error: message },
-      { status: 200 }
-    );
+    const message = err instanceof Error ? err.message : "Connection failed";
+    return Response.json({ success: false, error: message }, { status: 200 });
   }
 }

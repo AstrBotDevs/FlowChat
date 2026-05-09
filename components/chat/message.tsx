@@ -3,6 +3,10 @@ import type { UseChatHelpers } from "@ai-sdk/react";
 import { useCallback, useRef, useState } from "react";
 import useSWR from "swr";
 import { useTextSelection } from "@/hooks/use-text-selection";
+import {
+  DEFAULT_MODEL_SELECTION,
+  type ModelSelection,
+} from "@/lib/ai/model-selection";
 import type { Vote } from "@/lib/db/schema";
 import type { ChatMessage } from "@/lib/types";
 import { cn, fetcher, sanitizeText } from "@/lib/utils";
@@ -59,7 +63,7 @@ const PurePreviewMessage = ({
   regenerate: _regenerate,
   requiresScrollPadding: _requiresScrollPadding,
   onEdit,
-  selectedChatModel,
+  modelSelection,
 }: {
   addToolApprovalResponse: UseChatHelpers<ChatMessage>["addToolApprovalResponse"];
   chatId: string;
@@ -70,7 +74,7 @@ const PurePreviewMessage = ({
   regenerate: UseChatHelpers<ChatMessage>["regenerate"];
   requiresScrollPadding: boolean;
   onEdit?: (message: ChatMessage) => void;
-  selectedChatModel?: string;
+  modelSelection?: ModelSelection;
 }) => {
   const attachmentsFromMessage = message.parts.filter(
     (part) => part.type === "file"
@@ -450,9 +454,9 @@ const PurePreviewMessage = ({
           anchor={activePopover.anchor}
           chatId={chatId}
           existingThreadId={activePopover.existingThreadId}
+          modelSelection={modelSelection ?? DEFAULT_MODEL_SELECTION}
           onClose={handlePopoverClose}
           quoteText={activePopover.quoteText}
-          selectedChatModel={selectedChatModel ?? ""}
           sourceMessageId={activePopover.sourceMessageId}
           sourceThreadId={activePopover.sourceThreadId}
         />

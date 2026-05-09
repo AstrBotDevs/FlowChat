@@ -9,7 +9,7 @@ import {
   uuid,
   varchar,
 } from "drizzle-orm/pg-core";
-import { chat, message } from "./schema";
+import { chat } from "./schema";
 
 export const thread = pgTable(
   "Thread",

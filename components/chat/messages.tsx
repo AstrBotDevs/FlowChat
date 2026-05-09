@@ -2,6 +2,7 @@ import type { UseChatHelpers } from "@ai-sdk/react";
 import { ArrowDownIcon } from "lucide-react";
 import { useEffect, useRef } from "react";
 import { useMessages } from "@/hooks/use-messages";
+import type { ModelSelection } from "@/lib/ai/model-selection";
 import type { Vote } from "@/lib/db/schema";
 import type { ChatMessage } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -19,7 +20,7 @@ type MessagesProps = {
   regenerate: UseChatHelpers<ChatMessage>["regenerate"];
   isArtifactVisible: boolean;
   isLoading?: boolean;
-  selectedModelId: string;
+  modelSelection: ModelSelection;
   onEditMessage?: (message: ChatMessage) => void;
 };
 
@@ -33,7 +34,7 @@ function PureMessages({
   regenerate,
   isArtifactVisible,
   isLoading,
-  selectedModelId,
+  modelSelection,
   onEditMessage,
 }: MessagesProps) {
   const {
@@ -82,12 +83,12 @@ function PureMessages({
               }
               key={message.id}
               message={message}
+              modelSelection={modelSelection}
               onEdit={onEditMessage}
               regenerate={regenerate}
               requiresScrollPadding={
                 hasSentMessage && index === messages.length - 1
               }
-              selectedChatModel={selectedModelId}
               setMessages={setMessages}
               vote={
                 votes

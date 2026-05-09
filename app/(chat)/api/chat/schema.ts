@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { modelSelectionSchema } from "@/lib/ai/model-selection";
 
 const textPartSchema = z.object({
   type: z.enum(["text"]),
@@ -30,7 +31,8 @@ export const postRequestBodySchema = z.object({
   id: z.string().uuid(),
   message: userMessageSchema.optional(),
   messages: z.array(toolApprovalMessageSchema).optional(),
-  selectedChatModel: z.string(),
+  selectedChatModel: z.string().optional(),
+  modelSelection: modelSelectionSchema.optional(),
 });
 
 export type PostRequestBody = z.infer<typeof postRequestBodySchema>;

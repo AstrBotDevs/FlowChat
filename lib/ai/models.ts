@@ -71,7 +71,5 @@ export async function getAllModels(): Promise<ChatModel[]> {
 export function getCapabilitiesFromModels(
   models: ChatModel[]
 ): Record<string, ModelCapabilities> {
-  return Object.fromEntries(
-    models.map((m) => [m.id, m.capabilities])
-  );
+  return Object.fromEntries(models.map((m) => [m.id, m.capabilities]));
 }

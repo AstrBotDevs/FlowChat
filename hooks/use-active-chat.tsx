@@ -9,6 +9,7 @@ import {
   type Dispatch,
   type ReactNode,
   type SetStateAction,
+  useCallback,
   useContext,
   useEffect,
   useMemo,
@@ -21,7 +22,13 @@ import { useDataStream } from "@/components/chat/data-stream-provider";
 import { getChatHistoryPaginationKey } from "@/components/chat/sidebar-history";
 import { toast } from "@/components/chat/toast";
 import { useAutoResume } from "@/hooks/use-auto-resume";
-import { DEFAULT_CHAT_MODEL } from "@/lib/ai/models";
+import {
+  DEFAULT_MODEL_SELECTION,
+  legacyModelIdToSelection,
+  type ModelSelection,
+  parseModelSelectionCookie,
+  serializeModelSelection,
+} from "@/lib/ai/model-selection";
 import type { Vote } from "@/lib/db/schema";
 import { ChatbotError } from "@/lib/errors";
 import type { ChatMessage } from "@/lib/types";
@@ -40,8 +47,8 @@ type ActiveChatContextValue = {
   setInput: Dispatch<SetStateAction<string>>;
   isLoading: boolean;
   votes: Vote[] | undefined;
-  currentModelId: string;
-  setCurrentModelId: (id: string) => void;
+  currentModelSelection: ModelSelection;
+  setCurrentModelSelection: (selection: ModelSelection) => void;
 };
 
 const ActiveChatContext = createContext<ActiveChatContextValue | null>(null);
@@ -68,11 +75,18 @@ export function ActiveChatProvider({ children }: { children: ReactNode }) {
 
   const chatId = chatIdFromUrl ?? newChatIdRef.current;
 
-  const [currentModelId, setCurrentModelId] = useState(DEFAULT_CHAT_MODEL);
-  const currentModelIdRef = useRef(currentModelId);
+  const [currentModelSelection, setCurrentModelSelectionState] =
+    useState<ModelSelection>(DEFAULT_MODEL_SELECTION);
+  const currentModelSelectionRef = useRef(currentModelSelection);
   useEffect(() => {
-    currentModelIdRef.current = currentModelId;
-  }, [currentModelId]);
+    currentModelSelectionRef.current = currentModelSelection;
+  }, [currentModelSelection]);
+
+  const setCurrentModelSelection = useCallback((selection: ModelSelection) => {
+    setCurrentModelSelectionState(selection);
+    // biome-ignore lint/suspicious/noDocumentCookie: selection is shared with server requests and legacy cookie restore.
+    document.cookie = `chat-model-selection=${serializeModelSelection(selection)}; path=/; max-age=31536000`;
+  }, []);
 
   const [input, setInput] = useState("");
 
@@ -135,7 +149,7 @@ export function ActiveChatProvider({ children }: { children: ReactNode }) {
             ...(isToolApprovalContinuation
               ? { messages: request.messages }
               : { message: lastMessage }),
-            selectedChatModel: currentModelIdRef.current,
+            modelSelection: currentModelSelectionRef.current,
             ...request.body,
           },
         };
@@ -187,12 +201,24 @@ export function ActiveChatProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (chatData && !isNewChat) {
+      const cookieSelection = document.cookie
+        .split("; ")
+        .find((row) => row.startsWith("chat-model-selection="))
+        ?.split("=")[1];
+      const parsedSelection = parseModelSelectionCookie(cookieSelection);
+      if (parsedSelection) {
+        setCurrentModelSelectionState(parsedSelection);
+        return;
+      }
+
       const cookieModel = document.cookie
         .split("; ")
         .find((row) => row.startsWith("chat-model="))
         ?.split("=")[1];
       if (cookieModel) {
-        setCurrentModelId(decodeURIComponent(cookieModel));
+        setCurrentModelSelectionState(
+          legacyModelIdToSelection(decodeURIComponent(cookieModel))
+        );
       }
     }
   }, [chatData, isNewChat]);
@@ -244,8 +270,8 @@ export function ActiveChatProvider({ children }: { children: ReactNode }) {
       setInput,
       isLoading: !isNewChat && isLoading,
       votes,
-      currentModelId,
-      setCurrentModelId,
+      currentModelSelection,
+      setCurrentModelSelection,
     }),
     [
       chatId,
@@ -260,7 +286,8 @@ export function ActiveChatProvider({ children }: { children: ReactNode }) {
       isNewChat,
       isLoading,
       votes,
-      currentModelId,
+      currentModelSelection,
+      setCurrentModelSelection,
     ]
   );
 

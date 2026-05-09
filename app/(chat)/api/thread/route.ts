@@ -4,6 +4,11 @@ import {
   streamText,
 } from "ai";
 import { auth } from "@/app/(auth)/auth";
+import {
+  legacyModelIdToSelection,
+  type ModelSelection,
+  parseModelSelection,
+} from "@/lib/ai/model-selection";
 import { buildThreadPrompt, threadSystemPrompt } from "@/lib/ai/prompts-thread";
 import { getLanguageModel } from "@/lib/ai/providers";
 import { getChatById, getMessageById } from "@/lib/db/queries";
@@ -55,7 +60,8 @@ export async function POST(request: Request) {
     threadId: string;
     chatId: string;
     message: string;
-    selectedChatModel: string;
+    selectedChatModel?: string;
+    modelSelection?: ModelSelection;
     sourceMessageId?: string;
     quoteText?: string;
     sourceThreadId?: string | null;
@@ -79,6 +85,7 @@ export async function POST(request: Request) {
       chatId,
       message: userMessage,
       selectedChatModel,
+      modelSelection,
       sourceMessageId,
       quoteText,
       sourceThreadId,
@@ -223,7 +230,10 @@ export async function POST(request: Request) {
       threadMessages,
     });
 
-    const model = await getLanguageModel(selectedChatModel, userId);
+    const selectedModel =
+      parseModelSelection(modelSelection) ??
+      legacyModelIdToSelection(selectedChatModel ?? "deepseek/deepseek-v3.2");
+    const model = await getLanguageModel(selectedModel, userId);
 
     const stream = createUIMessageStream({
       execute: ({ writer }) => {

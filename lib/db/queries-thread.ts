@@ -5,12 +5,12 @@ import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import { ChatbotError } from "../errors";
 import {
-  quote,
-  thread,
-  threadMessage,
   type Quote,
+  quote,
   type Thread,
   type ThreadMessage,
+  thread,
+  threadMessage,
 } from "./schema";
 
 const client = postgres(process.env.POSTGRES_URL ?? "");
@@ -42,7 +42,9 @@ export async function createThread({
 
 export async function getThreadById({
   id,
-}: { id: string }): Promise<Thread | null> {
+}: {
+  id: string;
+}): Promise<Thread | null> {
   try {
     const [result] = await db.select().from(thread).where(eq(thread.id, id));
     return result ?? null;
@@ -87,10 +89,7 @@ export async function getQuotesByMessageId({
       .select()
       .from(quote)
       .where(
-        and(
-          eq(quote.sourceMessageId, messageId),
-          eq(quote.isUnlinked, false)
-        )
+        and(eq(quote.sourceMessageId, messageId), eq(quote.isUnlinked, false))
       )
       .orderBy(asc(quote.createdAt));
   } catch (_error) {
@@ -100,7 +99,9 @@ export async function getQuotesByMessageId({
 
 export async function getQuoteById({
   id,
-}: { id: string }): Promise<Quote | null> {
+}: {
+  id: string;
+}): Promise<Quote | null> {
   try {
     const [result] = await db.select().from(quote).where(eq(quote.id, id));
     return result ?? null;
@@ -122,7 +123,9 @@ export async function unlinkQuote({ id }: { id: string }) {
 
 export async function unlinkAllQuotesByMessageId({
   messageId,
-}: { messageId: string }) {
+}: {
+  messageId: string;
+}) {
   try {
     return await db
       .update(quote)
@@ -185,7 +188,9 @@ export async function saveThreadMessage({
 
 export async function getThreadMessageById({
   id,
-}: { id: string }): Promise<ThreadMessage | null> {
+}: {
+  id: string;
+}): Promise<ThreadMessage | null> {
   try {
     const [result] = await db
       .select()
@@ -221,16 +226,16 @@ export async function getThreadMessagesByThreadId({
 
 // ---- Cascade delete (called by deleteChatById / deleteAllChatsByUserId) ----
 
-export async function deleteThreadDataByChatId({
-  chatId,
-}: { chatId: string }) {
+export async function deleteThreadDataByChatId({ chatId }: { chatId: string }) {
   try {
     const threads = await db
       .select({ id: thread.id })
       .from(thread)
       .where(eq(thread.chatId, chatId));
 
-    if (threads.length === 0) return;
+    if (threads.length === 0) {
+      return;
+    }
 
     const threadIds = threads.map((t) => t.id);
 

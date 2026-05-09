@@ -19,12 +19,10 @@ import {
 import { createPortal } from "react-dom";
 import useSWR from "swr";
 import { MessageResponse } from "@/components/ai-elements/message";
+import { type ThreadMessageItem, useThreadChat } from "@/hooks/use-thread-chat";
+import type { ModelSelection } from "@/lib/ai/model-selection";
 import { cn, fetcher } from "@/lib/utils";
-import {
-  useThreadChat,
-  type ThreadMessageItem,
-} from "@/hooks/use-thread-chat";
-import { AnnotatedText, type AnnotatedQuote } from "./annotated-text";
+import { type AnnotatedQuote, AnnotatedText } from "./annotated-text";
 
 type QuoteWithRounds = AnnotatedQuote & {
   sourceMessageId: string;
@@ -53,7 +51,9 @@ function getThreadMessageText(message: ThreadMessageItem) {
 function getAnchorRect(anchor: FollowUpPopoverAnchor): DOMRect | null {
   if (anchor.kind === "range") {
     const r = anchor.range.getBoundingClientRect();
-    if (r.width === 0 && r.height === 0) return null;
+    if (r.width === 0 && r.height === 0) {
+      return null;
+    }
     return r;
   }
   const el = document.querySelector(
@@ -73,7 +73,9 @@ function useAnchorPosition(
 
     const update = () => {
       const rect = getAnchorRect(anchor);
-      if (!rect) return;
+      if (!rect) {
+        return;
+      }
 
       const popoverRect = popoverEl?.getBoundingClientRect();
       const popoverHeight = popoverRect?.height ?? POPOVER_MAX_HEIGHT;
@@ -97,7 +99,9 @@ function useAnchorPosition(
         : Math.min(rect.bottom + GAP, vh - popoverHeight - GAP);
 
       setPos((prev) => {
-        if (prev && prev.top === top && prev.left === left) return prev;
+        if (prev && prev.top === top && prev.left === left) {
+          return prev;
+        }
         return { top, left };
       });
     };
@@ -137,7 +141,7 @@ export function FollowUpPopover({
   quoteText,
   sourceThreadId,
   existingThreadId,
-  selectedChatModel,
+  modelSelection,
   anchor,
   onClose,
   breadcrumbs: externalBreadcrumbs,
@@ -147,7 +151,7 @@ export function FollowUpPopover({
   quoteText: string;
   sourceThreadId: string | null;
   existingThreadId?: string;
-  selectedChatModel: string;
+  modelSelection: ModelSelection;
   anchor: FollowUpPopoverAnchor;
   onClose: (hasMessages: boolean) => void;
   breadcrumbs?: PopoverBreadcrumb[];
@@ -159,10 +163,12 @@ export function FollowUpPopover({
   const [currentQuoteText, setCurrentQuoteText] = useState(quoteText);
   const [currentSourceMessageId, setCurrentSourceMessageId] =
     useState(sourceMessageId);
-  const [currentSourceThreadId, setCurrentSourceThreadId] =
-    useState<string | null>(sourceThreadId);
-  const [currentExistingThreadId, setCurrentExistingThreadId] =
-    useState<string | undefined>(existingThreadId);
+  const [currentSourceThreadId, setCurrentSourceThreadId] = useState<
+    string | null
+  >(sourceThreadId);
+  const [currentExistingThreadId, setCurrentExistingThreadId] = useState<
+    string | undefined
+  >(existingThreadId);
 
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const conversationRef = useRef<HTMLDivElement>(null);
@@ -177,7 +183,6 @@ export function FollowUpPopover({
     sendMessage,
     loadHistory,
     stop,
-    setMessages,
     reset: resetChat,
   } = useThreadChat({
     chatId,
@@ -185,7 +190,7 @@ export function FollowUpPopover({
     quoteText: currentQuoteText,
     sourceThreadId: currentSourceThreadId,
     existingThreadId: currentExistingThreadId,
-    selectedChatModel,
+    modelSelection,
   });
 
   useEffect(() => {
@@ -198,11 +203,9 @@ export function FollowUpPopover({
     inputRef.current?.focus();
   }, []);
 
-  useEffect(() => {
-    if (conversationRef.current) {
-      conversationRef.current.scrollTop = conversationRef.current.scrollHeight;
-    }
-  }, [messages]);
+  if (conversationRef.current) {
+    conversationRef.current.scrollTop = conversationRef.current.scrollHeight;
+  }
 
   useEffect(() => {
     const handleEsc = (e: globalThis.KeyboardEvent) => {
@@ -231,7 +234,9 @@ export function FollowUpPopover({
 
   const handleSend = useCallback(() => {
     const text = inputValue.trim();
-    if (!text || status === "streaming") return;
+    if (!text || status === "streaming") {
+      return;
+    }
     setInputValue("");
     sendMessage(text);
   }, [inputValue, status, sendMessage]);
@@ -281,8 +286,13 @@ export function FollowUpPopover({
   );
 
   const handleBreadcrumbBack = useCallback(() => {
-    if (breadcrumbs.length === 0) return;
-    const prev = breadcrumbs[breadcrumbs.length - 1];
+    if (breadcrumbs.length === 0) {
+      return;
+    }
+    const prev = breadcrumbs.at(-1);
+    if (!prev) {
+      return;
+    }
     setBreadcrumbs((bc) => bc.slice(0, -1));
     setCurrentQuoteText(prev.quoteText);
     if (prev.threadId) {
@@ -309,8 +319,11 @@ export function FollowUpPopover({
         return;
       }
       const range = sel.getRangeAt(0);
-      const bubble = (range.startContainer as HTMLElement).closest?.("[data-thread-msg-id]")
-        ?? (range.startContainer.parentElement)?.closest?.("[data-thread-msg-id]");
+      const bubble =
+        (range.startContainer as HTMLElement).closest?.(
+          "[data-thread-msg-id]"
+        ) ??
+        range.startContainer.parentElement?.closest?.("[data-thread-msg-id]");
       if (!bubble) {
         setNestedSelection(null);
         return;
@@ -322,7 +335,9 @@ export function FollowUpPopover({
 
   const hasConversation = messages.length > 0;
 
-  if (!pos) return null;
+  if (!pos) {
+    return null;
+  }
 
   const popoverContent = (
     <motion.div
@@ -388,6 +403,7 @@ export function FollowUpPopover({
       </div>
 
       {/* Conversation area */}
+      {/* biome-ignore lint/a11y/noStaticElementInteractions: mouse selection inside this scroll region opens nested follow-up actions. */}
       <div
         className="overflow-y-auto"
         onMouseUp={handleNestedMouseUp}
@@ -397,13 +413,13 @@ export function FollowUpPopover({
           minHeight: hasConversation ? 60 : 0,
           display: hasConversation ? "block" : "none",
         }}
+        tabIndex={-1}
       >
         <div className="relative flex flex-col gap-3 p-3">
           {messages.map((msg, index) => (
             <ThreadMessageBubble
               isLatestAssistant={
-                msg.role === "assistant" &&
-                index === messages.length - 1
+                msg.role === "assistant" && index === messages.length - 1
               }
               isStreaming={
                 status === "streaming" &&
@@ -420,13 +436,17 @@ export function FollowUpPopover({
             <button
               className="fixed z-[10000] flex items-center gap-1 rounded-md border border-border/50 bg-background px-2 py-1 text-[10px] font-medium text-foreground shadow-md hover:bg-accent"
               onClick={() => {
-                handleNestedFollowUp(nestedSelection.text, nestedSelection.msgId);
+                handleNestedFollowUp(
+                  nestedSelection.text,
+                  nestedSelection.msgId
+                );
                 setNestedSelection(null);
                 window.getSelection()?.removeAllRanges();
               }}
               style={{
                 top: nestedSelection.rect.bottom + 4,
-                left: nestedSelection.rect.left + nestedSelection.rect.width / 2,
+                left:
+                  nestedSelection.rect.left + nestedSelection.rect.width / 2,
                 transform: "translateX(-50%)",
               }}
               type="button"
@@ -542,7 +562,9 @@ function ThreadMessageBubble({
             <AnnotatedText
               onAnchorClick={(threadId, quoteId) => {
                 const q = quotes.find((item) => item.id === quoteId);
-                if (!q || !onAnchorClick) return;
+                if (!q || !onAnchorClick) {
+                  return;
+                }
                 onAnchorClick({
                   quoteText: q.quoteText,
                   sourceMessageId: q.sourceMessageId,

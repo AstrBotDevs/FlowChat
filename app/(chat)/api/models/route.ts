@@ -1,7 +1,4 @@
-import {
-  getAllModels,
-  getCapabilitiesFromModels,
-} from "@/lib/ai/models";
+import { getAllModels, getCapabilitiesFromModels } from "@/lib/ai/models";
 
 export async function GET() {
   const headers = {
@@ -11,8 +8,5 @@ export async function GET() {
   const models = await getAllModels();
   const capabilities = getCapabilitiesFromModels(models);
 
-  return Response.json(
-    { capabilities, models },
-    { headers }
-  );
+  return Response.json({ capabilities, models }, { headers });
 }

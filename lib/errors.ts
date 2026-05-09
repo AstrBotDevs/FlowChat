@@ -15,8 +15,7 @@ export type Surface =
   | "history"
   | "vote"
   | "document"
-  | "suggestions"
-;
+  | "suggestions";
 
 export type ErrorCode = `${ErrorType}:${Surface}`;
 

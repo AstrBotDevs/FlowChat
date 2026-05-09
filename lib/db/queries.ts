@@ -142,8 +142,10 @@ export async function exportUserData({ userId }: { userId: string }) {
           id: userProvider.id,
           userId: userProvider.userId,
           providerId: userProvider.providerId,
+          displayName: userProvider.displayName,
           baseUrl: userProvider.baseUrl,
           providerType: userProvider.providerType,
+          models: userProvider.models,
           createdAt: userProvider.createdAt,
           updatedAt: userProvider.updatedAt,
         })
@@ -870,15 +872,28 @@ export async function getUserProviderByProviderId({
 export async function upsertUserProvider({
   userId,
   providerId,
+  displayName,
   apiKey,
   baseUrl,
   providerType,
+  models,
 }: {
   userId: string;
   providerId: string;
+  displayName?: string | null;
   apiKey: string;
   baseUrl: string | null;
-  providerType: "openai-compatible" | "anthropic" | "google";
+  providerType:
+    | "openai"
+    | "anthropic"
+    | "google"
+    | "deepseek"
+    | "moonshotai"
+    | "alibaba"
+    | "xai"
+    | "gateway"
+    | "openai-compatible";
+  models?: string[];
 }) {
   try {
     return await db
@@ -886,17 +901,21 @@ export async function upsertUserProvider({
       .values({
         userId,
         providerId,
+        displayName: displayName ?? null,
         apiKey,
         baseUrl,
         providerType,
+        models: models ?? [],
         updatedAt: new Date(),
       })
       .onConflictDoUpdate({
         target: [userProvider.userId, userProvider.providerId],
         set: {
+          displayName: displayName ?? null,
           apiKey,
           baseUrl,
           providerType,
+          models: models ?? [],
           updatedAt: new Date(),
         },
       })

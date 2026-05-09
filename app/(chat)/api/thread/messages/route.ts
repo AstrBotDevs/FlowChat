@@ -1,10 +1,10 @@
 import { auth } from "@/app/(auth)/auth";
+import { getChatById } from "@/lib/db/queries";
 import {
   getQuoteById,
   getThreadById,
   getThreadMessagesByThreadId,
 } from "@/lib/db/queries-thread";
-import { getChatById } from "@/lib/db/queries";
 import { ChatbotError } from "@/lib/errors";
 
 export async function GET(request: Request) {
@@ -17,11 +17,11 @@ export async function GET(request: Request) {
     }
 
     const session = await auth();
-    if (!session?.user) {
+    if (!session?.user?.id) {
       return new ChatbotError("unauthorized:chat").toResponse();
     }
 
-    const userId = session.user.id!;
+    const userId = session.user.id;
 
     const threadRecord = await getThreadById({ id: threadId });
     if (!threadRecord) {
@@ -38,7 +38,9 @@ export async function GET(request: Request) {
     let quoteText = "";
     let sourceMessageId = "";
     if (threadRecord.sourceQuoteId) {
-      const quoteRecord = await getQuoteById({ id: threadRecord.sourceQuoteId });
+      const quoteRecord = await getQuoteById({
+        id: threadRecord.sourceQuoteId,
+      });
       if (quoteRecord) {
         quoteText = quoteRecord.quoteText;
         sourceMessageId = quoteRecord.sourceMessageId;
@@ -50,13 +52,19 @@ export async function GET(request: Request) {
     let walkThread = threadRecord;
 
     while (walkThread.parentThreadId) {
-      const parentThread = await getThreadById({ id: walkThread.parentThreadId });
-      if (!parentThread) break;
+      const parentThread = await getThreadById({
+        id: walkThread.parentThreadId,
+      });
+      if (!parentThread) {
+        break;
+      }
 
       let parentQuoteText = "";
       if (walkThread.sourceQuoteId) {
         const q = await getQuoteById({ id: walkThread.sourceQuoteId });
-        if (q) parentQuoteText = q.quoteText;
+        if (q) {
+          parentQuoteText = q.quoteText;
+        }
       }
 
       breadcrumbs.unshift({

@@ -3,6 +3,7 @@
 import { generateText, type UIMessage } from "ai";
 import { cookies } from "next/headers";
 import { auth } from "@/app/(auth)/auth";
+import type { ModelSelection } from "@/lib/ai/model-selection";
 import { titlePrompt } from "@/lib/ai/prompts";
 import { getTitleModel } from "@/lib/ai/providers";
 import {
@@ -20,13 +21,13 @@ export async function saveChatModelAsCookie(model: string) {
 export async function generateTitleFromUserMessage({
   message,
   userId,
-  modelId,
+  modelSelection,
 }: {
   message: UIMessage;
   userId: string;
-  modelId: string;
+  modelSelection: ModelSelection;
 }) {
-  const model = await getTitleModel(modelId, userId);
+  const model = await getTitleModel(modelSelection, userId);
   const { text } = await generateText({
     model,
     system: titlePrompt,

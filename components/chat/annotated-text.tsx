@@ -31,16 +31,20 @@ export function AnnotatedText({
     quoteId: string;
   } | null>(null);
 
-  const quotesKey = quotes.map((q) => q.id).join(",");
-
   useEffect(() => {
     const container = containerRef.current;
-    if (!container || quotes.length === 0) return;
+    if (!container || quotes.length === 0) {
+      return;
+    }
 
-    for (const existing of container.querySelectorAll("[data-anchor-quote-id]")) {
+    for (const existing of container.querySelectorAll(
+      "[data-anchor-quote-id]"
+    )) {
       const parent = existing.parentNode;
       if (parent) {
-        while (existing.firstChild) parent.insertBefore(existing.firstChild, existing);
+        while (existing.firstChild) {
+          parent.insertBefore(existing.firstChild, existing);
+        }
         parent.removeChild(existing);
       }
     }
@@ -50,29 +54,35 @@ export function AnnotatedText({
       NodeFilter.SHOW_TEXT
     );
     const textNodes: Text[] = [];
-    let node: Node | null;
-    while ((node = treeWalker.nextNode())) {
+    let node = treeWalker.nextNode();
+    while (node) {
       textNodes.push(node as Text);
+      node = treeWalker.nextNode();
     }
 
     const fullText = textNodes.map((n) => n.textContent ?? "").join("");
 
     for (const q of quotes) {
       const searchIdx = fullText.indexOf(q.quoteText);
-      if (searchIdx === -1) continue;
+      if (searchIdx === -1) {
+        continue;
+      }
 
       const freshWalker = document.createTreeWalker(
         container,
         NodeFilter.SHOW_TEXT
       );
       const freshNodes: Text[] = [];
-      let fn: Node | null;
-      while ((fn = freshWalker.nextNode())) {
+      let fn = freshWalker.nextNode();
+      while (fn) {
         freshNodes.push(fn as Text);
+        fn = freshWalker.nextNode();
       }
       const freshFull = freshNodes.map((n) => n.textContent ?? "").join("");
       const freshIdx = freshFull.indexOf(q.quoteText);
-      if (freshIdx === -1) continue;
+      if (freshIdx === -1) {
+        continue;
+      }
 
       let charOffset = 0;
       const range = document.createRange();
@@ -97,7 +107,9 @@ export function AnnotatedText({
         charOffset = nodeEnd;
       }
 
-      if (!startSet) continue;
+      if (!startSet) {
+        continue;
+      }
 
       const wrapper = document.createElement("span");
       wrapper.setAttribute("data-anchor-quote-id", q.id);
@@ -108,22 +120,32 @@ export function AnnotatedText({
       try {
         range.surroundContents(wrapper);
       } catch {
-        continue;
+        // Some selections cross markup boundaries; skip anchors the DOM cannot wrap.
       }
     }
 
     const handleClick = (e: Event) => {
-      const target = (e.target as HTMLElement).closest("[data-anchor-quote-id]");
-      if (!target) return;
+      const target = (e.target as HTMLElement).closest(
+        "[data-anchor-quote-id]"
+      );
+      if (!target) {
+        return;
+      }
       const qid = target.getAttribute("data-anchor-quote-id") ?? "";
       const tid = target.getAttribute("data-anchor-thread-id") ?? "";
       callbacksRef.current.onAnchorClick(tid, qid);
     };
 
     const handleCtx = (e: Event) => {
-      if (!callbacksRef.current.onUnlink) return;
-      const target = (e.target as HTMLElement).closest("[data-anchor-quote-id]");
-      if (!target) return;
+      if (!callbacksRef.current.onUnlink) {
+        return;
+      }
+      const target = (e.target as HTMLElement).closest(
+        "[data-anchor-quote-id]"
+      );
+      if (!target) {
+        return;
+      }
       e.preventDefault();
       const qid = target.getAttribute("data-anchor-quote-id") ?? "";
       const me = e as MouseEvent;
@@ -137,11 +159,12 @@ export function AnnotatedText({
       container.removeEventListener("click", handleClick);
       container.removeEventListener("contextmenu", handleCtx);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [quotesKey]);
+  }, [quotes]);
 
   useEffect(() => {
-    if (!contextMenu) return;
+    if (!contextMenu) {
+      return;
+    }
     const close = () => setContextMenu(null);
     document.addEventListener("click", close);
     return () => document.removeEventListener("click", close);

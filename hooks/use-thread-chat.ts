@@ -1,8 +1,9 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
-import { generateUUID } from "@/lib/utils";
 import type { UIMessage } from "ai";
+import { useCallback, useRef, useState } from "react";
+import type { ModelSelection } from "@/lib/ai/model-selection";
+import { generateUUID } from "@/lib/utils";
 
 export type ThreadMessageItem = UIMessage;
 
@@ -10,12 +11,12 @@ export type ThreadChatStatus = "idle" | "streaming" | "error";
 
 function appendAssistantText(messages: UIMessage[], text: string) {
   const updated = [...messages];
-  const last = updated[updated.length - 1];
+  const last = updated.at(-1);
   if (!last || last.role !== "assistant") {
     return updated;
   }
 
-  const lastPart = last.parts[last.parts.length - 1];
+  const lastPart = last.parts.at(-1);
   const nextParts = [...last.parts];
   if (lastPart && lastPart.type === "text") {
     nextParts[nextParts.length - 1] = {
@@ -43,14 +44,14 @@ export function useThreadChat({
   quoteText,
   sourceThreadId,
   existingThreadId,
-  selectedChatModel,
+  modelSelection,
 }: {
   chatId: string;
   sourceMessageId: string;
   quoteText: string;
   sourceThreadId: string | null;
   existingThreadId?: string;
-  selectedChatModel: string;
+  modelSelection: ModelSelection;
 }) {
   const [messages, setMessages] = useState<UIMessage[]>([]);
   const [status, setStatus] = useState<ThreadChatStatus>("idle");
@@ -59,24 +60,23 @@ export function useThreadChat({
   );
   const abortRef = useRef<AbortController | null>(null);
 
-  const loadHistory = useCallback(
-    async (tid: string) => {
-      try {
-        const res = await fetch(
-          `/api/thread/messages?threadId=${encodeURIComponent(tid)}`
-        );
-        if (!res.ok) return null;
-
-        const data = await res.json();
-        setMessages(data.messages ?? []);
-        setThreadId(tid);
-        return data;
-      } catch (_error) {
+  const loadHistory = useCallback(async (tid: string) => {
+    try {
+      const res = await fetch(
+        `/api/thread/messages?threadId=${encodeURIComponent(tid)}`
+      );
+      if (!res.ok) {
         return null;
       }
-    },
-    []
-  );
+
+      const data = await res.json();
+      setMessages(data.messages ?? []);
+      setThreadId(tid);
+      return data;
+    } catch (_error) {
+      return null;
+    }
+  }, []);
 
   const sendMessage = useCallback(
     async (text: string) => {
@@ -111,7 +111,7 @@ export function useThreadChat({
           threadId: currentThreadId,
           chatId,
           message: text,
-          selectedChatModel,
+          modelSelection,
           ...(isNewThread
             ? { sourceMessageId, quoteText, sourceThreadId }
             : {}),
@@ -144,7 +144,9 @@ export function useThreadChat({
 
         while (true) {
           const { done, value } = await reader.read();
-          if (done) break;
+          if (done) {
+            break;
+          }
 
           buffer += decoder.decode(value, { stream: true });
           const lines = buffer.split("\n");
@@ -152,11 +154,17 @@ export function useThreadChat({
 
           for (const line of lines) {
             const trimmedLine = line.trim();
-            if (!trimmedLine || trimmedLine.startsWith(":")) continue;
-            if (!trimmedLine.startsWith("data:")) continue;
+            if (!trimmedLine || trimmedLine.startsWith(":")) {
+              continue;
+            }
+            if (!trimmedLine.startsWith("data:")) {
+              continue;
+            }
 
             const payload = trimmedLine.slice(5).trim();
-            if (!payload || payload === "[DONE]") continue;
+            if (!payload || payload === "[DONE]") {
+              continue;
+            }
 
             try {
               const parsed = JSON.parse(payload);
@@ -195,7 +203,7 @@ export function useThreadChat({
     [
       threadId,
       chatId,
-      selectedChatModel,
+      modelSelection,
       sourceMessageId,
       quoteText,
       sourceThreadId,

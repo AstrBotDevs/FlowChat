@@ -10,13 +10,21 @@ function stripFences(code: string): string {
     .trim();
 }
 
+function getSessionUserId(session: { user?: { id?: string | null } }) {
+  if (!session.user?.id) {
+    throw new Error("Unauthorized");
+  }
+  return session.user.id;
+}
+
 export const codeDocumentHandler = createDocumentHandler<"code">({
   kind: "code",
-  onCreateDocument: async ({ title, dataStream, modelId, session }) => {
+  onCreateDocument: async ({ title, dataStream, modelSelection, session }) => {
     let draftContent = "";
+    const userId = getSessionUserId(session);
 
     const { fullStream } = streamText({
-      model: await getLanguageModel(modelId, session.user!.id!),
+      model: await getLanguageModel(modelSelection, userId),
       system: `${codePrompt}\n\nOutput ONLY the code. No explanations, no markdown fences, no wrapping.`,
       prompt: title,
     });
@@ -34,11 +42,18 @@ export const codeDocumentHandler = createDocumentHandler<"code">({
 
     return stripFences(draftContent);
   },
-  onUpdateDocument: async ({ document, description, dataStream, modelId, session }) => {
+  onUpdateDocument: async ({
+    document,
+    description,
+    dataStream,
+    modelSelection,
+    session,
+  }) => {
     let draftContent = "";
+    const userId = getSessionUserId(session);
 
     const { fullStream } = streamText({
-      model: await getLanguageModel(modelId, session.user!.id!),
+      model: await getLanguageModel(modelSelection, userId),
       system: `${updateDocumentPrompt(document.content, "code")}\n\nOutput ONLY the complete updated code. No explanations, no markdown fences, no wrapping.`,
       prompt: description,
     });

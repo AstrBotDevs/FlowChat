@@ -12,58 +12,55 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { signOut, useSession } from "next-auth/react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { KNOWN_PROVIDERS, type ProviderType } from "@/lib/ai/provider-registry";
+  DIRECT_PROVIDER_IDS,
+  GATEWAY_PROVIDER_ID,
+  KNOWN_PROVIDERS,
+  type ProviderType,
+} from "@/lib/ai/provider-registry";
 
 type SavedProvider = {
   id: string;
   providerId: string;
-  providerType: string;
+  displayName: string | null;
+  providerType: ProviderType;
   baseUrl: string | null;
+  models: string[];
   apiKeyMasked: string;
 };
 
-type EditingProvider = {
-  providerId: string;
-  apiKey: string;
-  baseUrl: string;
-  providerType: ProviderType;
-};
+type EditingProvider =
+  | {
+      mode: "official";
+      providerId: string;
+      providerType: ProviderType;
+      apiKey: string;
+    }
+  | {
+      mode: "custom";
+      providerId?: string;
+      displayName: string;
+      baseUrl: string;
+      apiKey: string;
+      manualModels: string;
+    };
 
 type SettingsTab = "model" | "account";
 
-const PROVIDER_ORDER = [
-  "openai",
-  "anthropic",
-  "google",
-  "deepseek",
-  "mistral",
-  "xai",
-  "moonshotai",
-  "alibaba",
-  "minimax",
-  "cohere",
-  "perplexity",
-  "nvidia",
-  "meta",
-];
+const OFFICIAL_PROVIDER_IDS = [...DIRECT_PROVIDER_IDS, GATEWAY_PROVIDER_ID];
 
-function getOrderedProviderIds(): string[] {
-  const allIds = Object.keys(KNOWN_PROVIDERS);
-  const ordered = PROVIDER_ORDER.filter((id) => allIds.includes(id));
-  const remaining = allIds.filter((id) => !PROVIDER_ORDER.includes(id)).sort();
-  return [...ordered, ...remaining];
+function splitModels(value: string): string[] {
+  return value
+    .split(/[\n,]/)
+    .map((model) => model.trim())
+    .filter(Boolean);
 }
 
 export default function SettingsPage() {
@@ -86,6 +83,14 @@ export default function SettingsPage() {
   const basePath = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
   const isGuest = session?.user?.type === "guest";
   const isSessionLoading = sessionStatus === "loading";
+
+  const savedProviderIds = useMemo(
+    () => new Set(savedProviders.map((provider) => provider.providerId)),
+    [savedProviders]
+  );
+  const customProviders = savedProviders.filter(
+    (provider) => provider.providerType === "openai-compatible"
+  );
 
   const fetchProviders = useCallback(async () => {
     try {
@@ -112,25 +117,43 @@ export default function SettingsPage() {
 
     setSaving(true);
     try {
+      const body =
+        editingProvider.mode === "custom"
+          ? {
+              providerId: editingProvider.providerId,
+              displayName: editingProvider.displayName,
+              apiKey: editingProvider.apiKey,
+              baseUrl: editingProvider.baseUrl,
+              providerType: "openai-compatible",
+              manualModels: splitModels(editingProvider.manualModels),
+            }
+          : {
+              providerId: editingProvider.providerId,
+              apiKey: editingProvider.apiKey,
+              providerType: editingProvider.providerType,
+            };
+
       const res = await fetch(`${basePath}/api/providers`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          providerId: editingProvider.providerId,
-          apiKey: editingProvider.apiKey,
-          baseUrl: editingProvider.baseUrl || null,
-          providerType: editingProvider.providerType,
-        }),
+        body: JSON.stringify(body),
       });
 
+      const data = await res.json().catch(() => null);
+
       if (res.ok) {
-        toast.success(
-          `${KNOWN_PROVIDERS[editingProvider.providerId]?.name ?? editingProvider.providerId} saved`
-        );
+        const name =
+          editingProvider.mode === "custom"
+            ? editingProvider.displayName
+            : KNOWN_PROVIDERS[editingProvider.providerId]?.name;
+        toast.success(`${name ?? "Provider"} saved`);
+        if (data?.warning) {
+          toast.warning(`Saved, but model discovery failed: ${data.warning}`);
+        }
         setEditingProvider(null);
         await fetchProviders();
       } else {
-        toast.error("Failed to save provider");
+        toast.error(data?.message ?? "Failed to save provider");
       }
     } catch {
       toast.error("Failed to save provider");
@@ -242,20 +265,27 @@ export default function SettingsPage() {
     }
   };
 
-  const savedProviderIds = new Set(savedProviders.map((p) => p.providerId));
-  const orderedIds = getOrderedProviderIds();
-
-  const startEditing = (providerId: string) => {
-    const existing = savedProviders.find((p) => p.providerId === providerId);
-    const known = KNOWN_PROVIDERS[providerId];
+  const startOfficialEditing = (providerId: string) => {
+    const providerType =
+      providerId === GATEWAY_PROVIDER_ID
+        ? "gateway"
+        : (providerId as ProviderType);
     setEditingProvider({
+      mode: "official",
       providerId,
+      providerType,
       apiKey: "",
-      baseUrl: existing?.baseUrl ?? known?.defaultBaseUrl ?? "",
-      providerType:
-        (existing?.providerType as ProviderType) ??
-        known?.type ??
-        "openai-compatible",
+    });
+  };
+
+  const startCustomEditing = (provider?: SavedProvider) => {
+    setEditingProvider({
+      mode: "custom",
+      providerId: provider?.providerId,
+      displayName: provider?.displayName ?? "",
+      baseUrl: provider?.baseUrl ?? "",
+      apiKey: "",
+      manualModels: provider?.models?.join("\n") ?? "",
     });
   };
 
@@ -468,13 +498,12 @@ export default function SettingsPage() {
               )}
             </section>
           ) : (
-            <section className="space-y-3" role="tabpanel">
+            <section className="space-y-5" role="tabpanel">
               <div>
                 <h2 className="text-[14px] font-medium">Provider Settings</h2>
                 <p className="text-[12px] text-muted-foreground">
-                  Configure your AI provider API keys. Your keys are stored
-                  securely and used to connect directly to the provider&apos;s
-                  API.
+                  Configure direct AI SDK providers, AI Gateway, and custom
+                  OpenAI-compatible endpoints.
                 </p>
               </div>
 
@@ -483,191 +512,347 @@ export default function SettingsPage() {
                   <Loader2Icon className="size-5 animate-spin text-muted-foreground" />
                 </div>
               ) : (
-                <div className="space-y-2">
-                  {orderedIds.map((providerId) => {
-                    const known = KNOWN_PROVIDERS[providerId];
-                    const saved = savedProviders.find(
-                      (p) => p.providerId === providerId
-                    );
-                    const isConfigured = savedProviderIds.has(providerId);
-                    const isEditing =
-                      editingProvider?.providerId === providerId;
+                <>
+                  <div className="space-y-2">
+                    <div className="text-[12px] font-medium text-muted-foreground">
+                      Official providers
+                    </div>
+                    {OFFICIAL_PROVIDER_IDS.map((providerId) => {
+                      const known = KNOWN_PROVIDERS[providerId];
+                      const saved = savedProviders.find(
+                        (provider) => provider.providerId === providerId
+                      );
+                      const isConfigured = savedProviderIds.has(providerId);
+                      const isEditing =
+                        editingProvider?.mode === "official" &&
+                        editingProvider.providerId === providerId;
 
-                    return (
-                      <div
-                        className="rounded-lg border border-border/50 bg-card/50 transition-colors"
-                        key={providerId}
-                      >
-                        <div className="flex items-center justify-between px-4 py-3">
-                          <div className="flex items-center gap-3">
-                            <div className="flex size-8 items-center justify-center rounded-md bg-muted text-xs font-bold uppercase text-muted-foreground">
-                              {known?.name?.charAt(0) ?? providerId.charAt(0)}
-                            </div>
-                            <div>
-                              <div className="text-[13px] font-medium">
-                                {known?.name ?? providerId}
+                      return (
+                        <div
+                          className="rounded-lg border border-border/50 bg-card/50"
+                          key={providerId}
+                        >
+                          <div className="flex items-center justify-between gap-3 px-4 py-3">
+                            <div className="flex items-center gap-3">
+                              <div className="flex size-8 items-center justify-center rounded-md bg-muted text-xs font-bold uppercase text-muted-foreground">
+                                {known?.name?.charAt(0) ?? providerId.charAt(0)}
                               </div>
-                              {isConfigured && saved && (
-                                <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-                                  <CheckCircleIcon className="size-3 text-emerald-500" />
-                                  <span className="font-mono">
-                                    {saved.apiKeyMasked}
-                                  </span>
+                              <div>
+                                <div className="flex items-center gap-2 text-[13px] font-medium">
+                                  {known?.name ?? providerId}
+                                  {providerId === GATEWAY_PROVIDER_ID && (
+                                    <Badge
+                                      className="h-4 px-1.5 text-[10px]"
+                                      variant="outline"
+                                    >
+                                      Gateway
+                                    </Badge>
+                                  )}
                                 </div>
-                              )}
+                                {isConfigured && saved && (
+                                  <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                                    <CheckCircleIcon className="size-3 text-emerald-500" />
+                                    <span className="font-mono">
+                                      {saved.apiKeyMasked}
+                                    </span>
+                                  </div>
+                                )}
+                              </div>
                             </div>
-                          </div>
 
-                          <div className="flex items-center gap-1.5">
-                            {isConfigured && (
-                              <>
-                                <Button
-                                  className="h-7 px-2 text-[11px]"
-                                  disabled={testing === providerId}
-                                  onClick={() =>
-                                    handleTestConnection(providerId)
-                                  }
-                                  variant="ghost"
-                                >
-                                  {testing === providerId ? (
-                                    <Loader2Icon className="mr-1 size-3 animate-spin" />
-                                  ) : null}
-                                  Test
-                                </Button>
-                                <Button
-                                  className="size-7 p-0 text-muted-foreground hover:text-destructive"
-                                  onClick={() => handleDelete(providerId)}
-                                  variant="ghost"
-                                >
-                                  <TrashIcon className="size-3.5" />
-                                </Button>
-                              </>
-                            )}
-                            <Button
-                              className="h-7 px-2 text-[11px]"
-                              onClick={() =>
-                                isEditing
-                                  ? setEditingProvider(null)
-                                  : startEditing(providerId)
-                              }
-                              variant={isEditing ? "secondary" : "outline"}
-                            >
-                              {isEditing ? (
+                            <div className="flex items-center gap-1.5">
+                              {isConfigured && (
                                 <>
-                                  <XCircleIcon className="mr-1 size-3" />
-                                  Cancel
-                                </>
-                              ) : isConfigured ? (
-                                "Edit"
-                              ) : (
-                                <>
-                                  <PlusIcon className="mr-1 size-3" />
-                                  Configure
+                                  <Button
+                                    className="h-7 px-2 text-[11px]"
+                                    disabled={testing === providerId}
+                                    onClick={() =>
+                                      handleTestConnection(providerId)
+                                    }
+                                    variant="ghost"
+                                  >
+                                    {testing === providerId ? (
+                                      <Loader2Icon className="mr-1 size-3 animate-spin" />
+                                    ) : null}
+                                    Test
+                                  </Button>
+                                  <Button
+                                    className="size-7 p-0 text-muted-foreground hover:text-destructive"
+                                    onClick={() => handleDelete(providerId)}
+                                    variant="ghost"
+                                  >
+                                    <TrashIcon className="size-3.5" />
+                                  </Button>
                                 </>
                               )}
-                            </Button>
-                          </div>
-                        </div>
-
-                        {isEditing && editingProvider && (
-                          <div className="space-y-3 border-t border-border/30 px-4 py-3">
-                            <div className="space-y-1.5">
-                              <Label className="text-[12px]">API Key</Label>
-                              <Input
-                                className="h-8 font-mono text-[12px]"
-                                onChange={(e) =>
-                                  setEditingProvider({
-                                    ...editingProvider,
-                                    apiKey: e.target.value,
-                                  })
-                                }
-                                placeholder={
-                                  isConfigured
-                                    ? "Enter new key to update..."
-                                    : "sk-..."
-                                }
-                                type="password"
-                                value={editingProvider.apiKey}
-                              />
-                            </div>
-
-                            <div className="space-y-1.5">
-                              <Label className="text-[12px]">
-                                Protocol Type
-                              </Label>
-                              <Select
-                                onValueChange={(val: ProviderType) =>
-                                  setEditingProvider({
-                                    ...editingProvider,
-                                    providerType: val,
-                                  })
-                                }
-                                value={editingProvider.providerType}
-                              >
-                                <SelectTrigger className="h-8 text-[12px]">
-                                  <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="openai-compatible">
-                                    OpenAI Compatible
-                                  </SelectItem>
-                                  <SelectItem value="anthropic">
-                                    Anthropic Native
-                                  </SelectItem>
-                                  <SelectItem value="google">
-                                    Google Native
-                                  </SelectItem>
-                                </SelectContent>
-                              </Select>
-                            </div>
-
-                            <div className="space-y-1.5">
-                              <Label className="text-[12px]">
-                                Base URL{" "}
-                                <span className="text-muted-foreground">
-                                  (optional — leave empty for official endpoint)
-                                </span>
-                              </Label>
-                              <Input
-                                className="h-8 font-mono text-[12px]"
-                                onChange={(e) =>
-                                  setEditingProvider({
-                                    ...editingProvider,
-                                    baseUrl: e.target.value,
-                                  })
-                                }
-                                placeholder={
-                                  known?.defaultBaseUrl ?? "https://..."
-                                }
-                                value={editingProvider.baseUrl}
-                              />
-                            </div>
-
-                            <div className="flex justify-end pt-1">
                               <Button
-                                className="h-8 px-4 text-[12px]"
-                                disabled={
-                                  saving ||
-                                  (!isConfigured && !editingProvider.apiKey)
+                                className="h-7 px-2 text-[11px]"
+                                onClick={() =>
+                                  isEditing
+                                    ? setEditingProvider(null)
+                                    : startOfficialEditing(providerId)
                                 }
-                                onClick={handleSave}
+                                variant={isEditing ? "secondary" : "outline"}
                               >
-                                {saving ? (
-                                  <Loader2Icon className="mr-1 size-3 animate-spin" />
-                                ) : null}
-                                {isConfigured ? "Update" : "Save"}
+                                {isEditing ? (
+                                  <>
+                                    <XCircleIcon className="mr-1 size-3" />
+                                    Cancel
+                                  </>
+                                ) : isConfigured ? (
+                                  "Edit"
+                                ) : (
+                                  <>
+                                    <PlusIcon className="mr-1 size-3" />
+                                    Configure
+                                  </>
+                                )}
                               </Button>
                             </div>
                           </div>
-                        )}
+
+                          {isEditing && editingProvider.mode === "official" && (
+                            <div className="space-y-3 border-t border-border/30 px-4 py-3">
+                              <div className="space-y-1.5">
+                                <Label className="text-[12px]">API Key</Label>
+                                <Input
+                                  className="h-8 font-mono text-[12px]"
+                                  onChange={(event) =>
+                                    setEditingProvider({
+                                      ...editingProvider,
+                                      apiKey: event.target.value,
+                                    })
+                                  }
+                                  placeholder={
+                                    isConfigured
+                                      ? "Enter new key to update..."
+                                      : "sk-..."
+                                  }
+                                  type="password"
+                                  value={editingProvider.apiKey}
+                                />
+                              </div>
+                              <div className="flex justify-end">
+                                <Button
+                                  className="h-8 px-4 text-[12px]"
+                                  disabled={saving || !editingProvider.apiKey}
+                                  onClick={handleSave}
+                                >
+                                  {saving ? (
+                                    <Loader2Icon className="mr-1 size-3 animate-spin" />
+                                  ) : null}
+                                  {isConfigured ? "Update" : "Save"}
+                                </Button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div className="text-[12px] font-medium text-muted-foreground">
+                        Custom OpenAI-compatible
                       </div>
-                    );
-                  })}
-                </div>
+                      <Button
+                        className="h-7 px-2 text-[11px]"
+                        onClick={() =>
+                          editingProvider?.mode === "custom" &&
+                          !editingProvider.providerId
+                            ? setEditingProvider(null)
+                            : startCustomEditing()
+                        }
+                        variant="outline"
+                      >
+                        <PlusIcon className="mr-1 size-3" />
+                        Add custom
+                      </Button>
+                    </div>
+
+                    {customProviders.map((provider) => {
+                      const isEditing =
+                        editingProvider?.mode === "custom" &&
+                        editingProvider.providerId === provider.providerId;
+
+                      return (
+                        <div
+                          className="rounded-lg border border-border/50 bg-card/50"
+                          key={provider.providerId}
+                        >
+                          <div className="flex items-center justify-between gap-3 px-4 py-3">
+                            <div>
+                              <div className="text-[13px] font-medium">
+                                {provider.displayName ?? provider.providerId}
+                              </div>
+                              <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
+                                <span className="font-mono">
+                                  {provider.apiKeyMasked}
+                                </span>
+                                <span>{provider.models.length} models</span>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-1.5">
+                              <Button
+                                className="h-7 px-2 text-[11px]"
+                                disabled={testing === provider.providerId}
+                                onClick={() =>
+                                  handleTestConnection(provider.providerId)
+                                }
+                                variant="ghost"
+                              >
+                                {testing === provider.providerId ? (
+                                  <Loader2Icon className="mr-1 size-3 animate-spin" />
+                                ) : null}
+                                Test
+                              </Button>
+                              <Button
+                                className="size-7 p-0 text-muted-foreground hover:text-destructive"
+                                onClick={() =>
+                                  handleDelete(provider.providerId)
+                                }
+                                variant="ghost"
+                              >
+                                <TrashIcon className="size-3.5" />
+                              </Button>
+                              <Button
+                                className="h-7 px-2 text-[11px]"
+                                onClick={() =>
+                                  isEditing
+                                    ? setEditingProvider(null)
+                                    : startCustomEditing(provider)
+                                }
+                                variant={isEditing ? "secondary" : "outline"}
+                              >
+                                {isEditing ? "Cancel" : "Edit"}
+                              </Button>
+                            </div>
+                          </div>
+
+                          {isEditing && editingProvider.mode === "custom" && (
+                            <CustomEditor
+                              editingProvider={editingProvider}
+                              isConfigured
+                              onSave={handleSave}
+                              saving={saving}
+                              setEditingProvider={setEditingProvider}
+                            />
+                          )}
+                        </div>
+                      );
+                    })}
+
+                    {editingProvider?.mode === "custom" &&
+                      !editingProvider.providerId && (
+                        <div className="rounded-lg border border-border/50 bg-card/50">
+                          <CustomEditor
+                            editingProvider={editingProvider}
+                            onSave={handleSave}
+                            saving={saving}
+                            setEditingProvider={setEditingProvider}
+                          />
+                        </div>
+                      )}
+                  </div>
+                </>
               )}
             </section>
           )}
         </div>
+      </div>
+    </div>
+  );
+}
+
+function CustomEditor({
+  editingProvider,
+  isConfigured = false,
+  saving,
+  setEditingProvider,
+  onSave,
+}: {
+  editingProvider: Extract<EditingProvider, { mode: "custom" }>;
+  isConfigured?: boolean;
+  saving: boolean;
+  setEditingProvider: (provider: EditingProvider) => void;
+  onSave: () => void;
+}) {
+  return (
+    <div className="space-y-3 border-t border-border/30 px-4 py-3">
+      <div className="grid gap-3 md:grid-cols-2">
+        <div className="space-y-1.5">
+          <Label className="text-[12px]">Name</Label>
+          <Input
+            className="h-8 text-[12px]"
+            onChange={(event) =>
+              setEditingProvider({
+                ...editingProvider,
+                displayName: event.target.value,
+              })
+            }
+            placeholder="My router"
+            value={editingProvider.displayName}
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label className="text-[12px]">API Key</Label>
+          <Input
+            className="h-8 font-mono text-[12px]"
+            onChange={(event) =>
+              setEditingProvider({
+                ...editingProvider,
+                apiKey: event.target.value,
+              })
+            }
+            placeholder={isConfigured ? "Enter new key to update..." : "sk-..."}
+            type="password"
+            value={editingProvider.apiKey}
+          />
+        </div>
+      </div>
+      <div className="space-y-1.5">
+        <Label className="text-[12px]">Base URL</Label>
+        <Input
+          className="h-8 font-mono text-[12px]"
+          onChange={(event) =>
+            setEditingProvider({
+              ...editingProvider,
+              baseUrl: event.target.value,
+            })
+          }
+          placeholder="https://api.example.com/v1"
+          value={editingProvider.baseUrl}
+        />
+      </div>
+      <div className="space-y-1.5">
+        <Label className="text-[12px]">Model IDs</Label>
+        <Textarea
+          className="min-h-24 font-mono text-[12px]"
+          onChange={(event) =>
+            setEditingProvider({
+              ...editingProvider,
+              manualModels: event.target.value,
+            })
+          }
+          placeholder={"model-a\nprovider/model-b"}
+          value={editingProvider.manualModels}
+        />
+      </div>
+      <div className="flex justify-end">
+        <Button
+          className="h-8 px-4 text-[12px]"
+          disabled={
+            saving ||
+            !editingProvider.displayName ||
+            !editingProvider.baseUrl ||
+            !editingProvider.apiKey
+          }
+          onClick={onSave}
+        >
+          {saving ? <Loader2Icon className="mr-1 size-3 animate-spin" /> : null}
+          {isConfigured ? "Update" : "Save"}
+        </Button>
       </div>
     </div>
   );

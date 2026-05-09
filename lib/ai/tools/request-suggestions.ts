@@ -1,6 +1,7 @@
 import { Output, streamText, tool, type UIMessageStreamWriter } from "ai";
 import type { Session } from "next-auth";
 import { z } from "zod";
+import type { ModelSelection } from "@/lib/ai/model-selection";
 import { getDocumentById, saveSuggestions } from "@/lib/db/queries";
 import type { Suggestion } from "@/lib/db/schema";
 import type { ChatMessage } from "@/lib/types";
@@ -10,13 +11,13 @@ import { getLanguageModel } from "../providers";
 type RequestSuggestionsProps = {
   session: Session;
   dataStream: UIMessageStreamWriter<ChatMessage>;
-  modelId: string;
+  modelSelection: ModelSelection;
 };
 
 export const requestSuggestions = ({
   session,
   dataStream,
-  modelId,
+  modelSelection,
 }: RequestSuggestionsProps) =>
   tool({
     description:
@@ -31,7 +32,7 @@ export const requestSuggestions = ({
     execute: async ({ documentId }) => {
       const document = await getDocumentById({ id: documentId });
 
-      if (!document || !document.content) {
+      if (!document?.content) {
         return {
           error: "Document not found",
         };
@@ -40,6 +41,7 @@ export const requestSuggestions = ({
       if (document.userId !== session.user?.id) {
         return { error: "Forbidden" };
       }
+      const userId = session.user.id;
 
       const suggestions: Omit<
         Suggestion,
@@ -47,7 +49,7 @@ export const requestSuggestions = ({
       >[] = [];
 
       const { partialOutputStream } = streamText({
-        model: await getLanguageModel(modelId, session.user!.id!),
+        model: await getLanguageModel(modelSelection, userId),
         system:
           "You are a writing assistant. Given a piece of writing, offer up to 5 suggestions to improve it. Each suggestion must contain full sentences, not just individual words. Describe what changed and why.",
         prompt: document.content,
