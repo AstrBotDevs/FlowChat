@@ -75,6 +75,46 @@ function setCookie(name: string, value: string) {
   document.cookie = `${name}=${encodeURIComponent(value)}; path=/; max-age=${maxAge}`;
 }
 
+const PROVIDER_EMPTY_STATE_DELAY_MS = 1200;
+
+function useStableProviders() {
+  const { data, isValidating } = useSWR<SavedProvider[]>(
+    `${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/api/providers`,
+    (url: string) => fetch(url).then((r) => r.json()),
+    { revalidateOnFocus: true, dedupingInterval: 30_000 }
+  );
+  const [stableProviders, setStableProviders] = useState<
+    SavedProvider[] | undefined
+  >();
+
+  useEffect(() => {
+    if (data === undefined) {
+      return;
+    }
+
+    if (data.length > 0) {
+      setStableProviders(data);
+      return;
+    }
+
+    if (isValidating) {
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      setStableProviders([]);
+    }, PROVIDER_EMPTY_STATE_DELAY_MS);
+
+    return () => clearTimeout(timer);
+  }, [data, isValidating]);
+
+  return {
+    isCheckingProviders:
+      data === undefined || isValidating || stableProviders === undefined,
+    providersData: stableProviders,
+  };
+}
+
 function PureMultimodalInput({
   chatId,
   input,
@@ -122,13 +162,12 @@ function PureMultimodalInput({
     (url: string) => fetch(url).then((r) => r.json()),
     { revalidateOnFocus: false, dedupingInterval: 3_600_000 }
   );
-  const { data: providersData } = useSWR(
-    `${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/api/providers`,
-    (url: string) => fetch(url).then((r) => r.json()),
-    { revalidateOnFocus: true, dedupingInterval: 30_000 }
-  );
+  const { isCheckingProviders, providersData } = useStableProviders();
   const hasConfiguredProviders = (providersData?.length ?? 0) > 0;
   const hasAutoFocused = useRef(false);
+  const showProviderSetupNotice =
+    Boolean(modelsData) && !isCheckingProviders && !hasConfiguredProviders;
+
   useEffect(() => {
     if (!hasAutoFocused.current && width) {
       const timer = setTimeout(() => {
@@ -431,7 +470,7 @@ function PureMultimodalInput({
         )}
       </div>
 
-      {modelsData && !hasConfiguredProviders && (
+      {showProviderSetupNotice && (
         <div className="flex items-center gap-2.5 rounded-xl border border-border/40 bg-card/60 px-4 py-3 text-[13px] text-muted-foreground">
           <KeyIcon className="size-4 shrink-0" />
           <span>
@@ -706,11 +745,7 @@ function PureModelSelectorCompact({
     (url: string) => fetch(url).then((r) => r.json()),
     { revalidateOnFocus: false, dedupingInterval: 3_600_000 }
   );
-  const { data: providersData } = useSWR(
-    `${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/api/providers`,
-    (url: string) => fetch(url).then((r) => r.json()),
-    { revalidateOnFocus: true, dedupingInterval: 30_000 }
-  );
+  const { isCheckingProviders, providersData } = useStableProviders();
 
   const capabilities: Record<string, ModelCapabilities> | undefined =
     modelsData?.capabilities;
@@ -873,6 +908,10 @@ function PureModelSelectorCompact({
     );
   }, [availableModels, selectedSelection, onModelChange]);
 
+  if (!modelsData || isCheckingProviders || availableModels.length === 0) {
+    return null;
+  }
+
   const groupByProvider = (models: SelectableModel[]) => {
     const grouped: Record<string, SelectableModel[]> = {};
     for (const model of models) {
@@ -952,34 +991,22 @@ function PureModelSelectorCompact({
       <ModelSelectorContent>
         <ModelSelectorInput placeholder="Search models..." />
         <ModelSelectorList>
-          {availableModels.length > 0 ? (
-            <>
-              {groupByProvider(standardAvailableModels).map(
-                ([prov, models]) => (
-                  <ModelSelectorGroup
-                    heading={KNOWN_PROVIDERS[prov]?.name ?? prov}
-                    key={prov}
-                  >
-                    {models.map((m) => renderModelItem(m, true))}
-                  </ModelSelectorGroup>
-                )
-              )}
+          {groupByProvider(standardAvailableModels).map(([prov, models]) => (
+            <ModelSelectorGroup
+              heading={KNOWN_PROVIDERS[prov]?.name ?? prov}
+              key={prov}
+            >
+              {models.map((m) => renderModelItem(m, true))}
+            </ModelSelectorGroup>
+          ))}
 
-              {customModels.length > 0 && (
-                <ModelSelectorGroup heading="Custom">
-                  {customModels.map((m) => renderModelItem(m, true))}
-                </ModelSelectorGroup>
-              )}
-            </>
-          ) : (
-            <ModelSelectorGroup heading="No providers configured">
-              <div className="px-3 py-2 text-[12px] text-muted-foreground">
-                Go to Settings to add an API key
-              </div>
+          {customModels.length > 0 && (
+            <ModelSelectorGroup heading="Custom">
+              {customModels.map((m) => renderModelItem(m, true))}
             </ModelSelectorGroup>
           )}
 
-          {unavailableModels.length > 0 && (
+          {!isCheckingProviders && unavailableModels.length > 0 && (
             <ModelSelectorGroup
               heading={
                 <button

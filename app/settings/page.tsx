@@ -23,7 +23,7 @@ import {
   useState,
 } from "react";
 import { toast } from "sonner";
-import { Badge } from "@/components/ui/badge";
+import { ModelSelectorLogo } from "@/components/ai-elements/model-selector";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -623,31 +623,23 @@ export default function SettingsPage() {
                           <div className="flex items-center justify-between gap-3 px-4 py-3">
                             <div className="flex items-center gap-3">
                               <div className="flex size-8 items-center justify-center rounded-md bg-muted text-xs font-bold uppercase text-muted-foreground">
-                                {known?.name?.charAt(0) ?? providerId.charAt(0)}
+                                <ModelSelectorLogo provider={providerId} />
                               </div>
                               <div>
                                 <div className="flex items-center gap-2 text-[13px] font-medium">
                                   {known?.name ?? providerId}
-                                  {providerId === GATEWAY_PROVIDER_ID && (
-                                    <Badge
-                                      className="h-4 px-1.5 text-[10px]"
-                                      variant="outline"
-                                    >
-                                      Gateway
-                                    </Badge>
+                                  {isConfigured && (
+                                    <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-600">
+                                      <CheckCircleIcon className="size-3" />
+                                      Configured
+                                    </span>
                                   )}
                                 </div>
                                 {isConfigured && saved && (
-                                  <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
-                                    <CheckCircleIcon className="size-3 text-emerald-500" />
-                                    <span className="font-mono">
-                                      {saved.apiKeyMasked}
-                                    </span>
-                                    <span>
-                                      {providerId === GATEWAY_PROVIDER_ID
-                                        ? "Gateway models"
-                                        : `${saved.models.length} enabled / ${saved.discoveredModels.length} discovered`}
-                                    </span>
+                                  <div className="text-[11px] text-muted-foreground">
+                                    {providerId === GATEWAY_PROVIDER_ID
+                                      ? "Gateway models enabled"
+                                      : `${saved.models.length} enabled / ${saved.discoveredModels.length} discovered`}
                                   </div>
                                 )}
                               </div>
@@ -828,17 +820,16 @@ export default function SettingsPage() {
                         >
                           <div className="flex items-center justify-between gap-3 px-4 py-3">
                             <div>
-                              <div className="text-[13px] font-medium">
+                              <div className="flex items-center gap-2 text-[13px] font-medium">
                                 {provider.displayName ?? provider.providerId}
+                                <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-600">
+                                  <CheckCircleIcon className="size-3" />
+                                  Configured
+                                </span>
                               </div>
-                              <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
-                                <span className="font-mono">
-                                  {provider.apiKeyMasked}
-                                </span>
-                                <span>
-                                  {provider.models.length} enabled /{" "}
-                                  {provider.discoveredModels.length} discovered
-                                </span>
+                              <div className="text-[11px] text-muted-foreground">
+                                {provider.models.length} enabled /{" "}
+                                {provider.discoveredModels.length} discovered
                               </div>
                             </div>
                             <div className="flex items-center gap-1.5">
