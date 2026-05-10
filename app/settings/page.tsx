@@ -27,7 +27,6 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import {
   DIRECT_PROVIDER_IDS,
   GATEWAY_PROVIDER_ID,
@@ -42,6 +41,7 @@ type SavedProvider = {
   providerType: ProviderType;
   baseUrl: string | null;
   models: string[];
+  discoveredModels: string[];
   apiKeyMasked: string;
 };
 
@@ -51,6 +51,7 @@ type EditingProvider =
       providerId: string;
       providerType: ProviderType;
       apiKey: string;
+      enabledModels: string[];
     }
   | {
       mode: "custom";
@@ -58,24 +59,24 @@ type EditingProvider =
       displayName: string;
       baseUrl: string;
       apiKey: string;
-      manualModels: string;
+      discoveredModels: string[];
+      enabledModels: string[];
     };
 
 type SettingsTab = "model" | "account";
 
 const OFFICIAL_PROVIDER_IDS = [...DIRECT_PROVIDER_IDS, GATEWAY_PROVIDER_ID];
 
-function splitModels(value: string): string[] {
-  return value
-    .split(/[\n,]/)
-    .map((model) => model.trim())
-    .filter(Boolean);
+function joinModelList(models: string[]): string[] {
+  return Array.from(
+    new Set(models.map((model) => model.trim()).filter(Boolean))
+  ).sort((a, b) => a.localeCompare(b));
 }
 
-function joinModels(models: string[]): string {
-  return Array.from(new Set(models))
-    .sort((a, b) => a.localeCompare(b))
-    .join("\n");
+function toggleModel(models: string[], modelId: string): string[] {
+  return models.includes(modelId)
+    ? models.filter((model) => model !== modelId)
+    : joinModelList([...models, modelId]);
 }
 
 function isValidHttpUrl(value: string): boolean {
@@ -96,6 +97,7 @@ export default function SettingsPage() {
     useState<EditingProvider | null>(null);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState<string | null>(null);
+  const [refreshingModels, setRefreshingModels] = useState<string | null>(null);
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -146,14 +148,19 @@ export default function SettingsPage() {
           ? {
               providerId: editingProvider.providerId,
               displayName: editingProvider.displayName,
-              apiKey: editingProvider.apiKey,
+              ...(editingProvider.apiKey
+                ? { apiKey: editingProvider.apiKey }
+                : {}),
               baseUrl: editingProvider.baseUrl,
+              enabledModels: editingProvider.enabledModels,
               providerType: "openai-compatible",
-              manualModels: splitModels(editingProvider.manualModels),
             }
           : {
               providerId: editingProvider.providerId,
-              apiKey: editingProvider.apiKey,
+              ...(editingProvider.apiKey
+                ? { apiKey: editingProvider.apiKey }
+                : {}),
+              enabledModels: editingProvider.enabledModels,
               providerType: editingProvider.providerType,
             };
 
@@ -221,6 +228,58 @@ export default function SettingsPage() {
       toast.error("Connection test failed");
     } finally {
       setTesting(null);
+    }
+  };
+
+  const handleTestModel = async (providerId: string, modelId: string) => {
+    const key = `model:${providerId}:${modelId}`;
+    setTesting(key);
+    try {
+      const res = await fetch(`${basePath}/api/providers/test-model`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ providerId, modelId }),
+      });
+      const data = await res.json().catch(() => null);
+      if (data?.success) {
+        toast.success(`${modelId} is available`);
+      } else {
+        toast.error(data?.error || "Model test failed");
+      }
+    } catch {
+      toast.error("Model test failed");
+    } finally {
+      setTesting(null);
+    }
+  };
+
+  const handleRefreshModels = async (providerId: string) => {
+    setRefreshingModels(providerId);
+    try {
+      const res = await fetch(`${basePath}/api/providers/discover`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ providerId }),
+      });
+      const data = await res.json().catch(() => null);
+
+      if (res.ok) {
+        await fetchProviders();
+        const count = Array.isArray(data?.discoveredModels)
+          ? data.discoveredModels.length
+          : 0;
+        if (data?.warning) {
+          toast.warning(`Model discovery failed: ${data.warning}`);
+        } else {
+          toast.success(`Found ${count} models`);
+        }
+      } else {
+        toast.error(data?.message ?? "Failed to fetch models");
+      }
+    } catch {
+      toast.error("Failed to fetch models");
+    } finally {
+      setRefreshingModels(null);
     }
   };
 
@@ -294,11 +353,15 @@ export default function SettingsPage() {
       providerId === GATEWAY_PROVIDER_ID
         ? "gateway"
         : (providerId as ProviderType);
+    const saved = savedProviders.find(
+      (provider) => provider.providerId === providerId
+    );
     setEditingProvider({
       mode: "official",
       providerId,
       providerType,
       apiKey: "",
+      enabledModels: saved?.models ?? [],
     });
   };
 
@@ -309,7 +372,8 @@ export default function SettingsPage() {
       displayName: provider?.displayName ?? "",
       baseUrl: provider?.baseUrl ?? "",
       apiKey: "",
-      manualModels: provider?.models?.join("\n") ?? "",
+      discoveredModels: provider?.discoveredModels ?? [],
+      enabledModels: provider?.models ?? [],
     });
   };
 
@@ -574,10 +638,15 @@ export default function SettingsPage() {
                                   )}
                                 </div>
                                 {isConfigured && saved && (
-                                  <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                                  <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
                                     <CheckCircleIcon className="size-3 text-emerald-500" />
                                     <span className="font-mono">
                                       {saved.apiKeyMasked}
+                                    </span>
+                                    <span>
+                                      {providerId === GATEWAY_PROVIDER_ID
+                                        ? "Gateway models"
+                                        : `${saved.models.length} enabled / ${saved.discoveredModels.length} discovered`}
                                     </span>
                                   </div>
                                 )}
@@ -587,6 +656,25 @@ export default function SettingsPage() {
                             <div className="flex items-center gap-1.5">
                               {isConfigured && (
                                 <>
+                                  {providerId !== GATEWAY_PROVIDER_ID && (
+                                    <Button
+                                      className="h-7 px-2 text-[11px]"
+                                      disabled={
+                                        refreshingModels === providerId
+                                      }
+                                      onClick={() =>
+                                        handleRefreshModels(providerId)
+                                      }
+                                      variant="ghost"
+                                    >
+                                      {refreshingModels === providerId ? (
+                                        <Loader2Icon className="mr-1 size-3 animate-spin" />
+                                      ) : (
+                                        <RefreshCwIcon className="mr-1 size-3" />
+                                      )}
+                                      Refresh models
+                                    </Button>
+                                  )}
                                   <Button
                                     className="h-7 px-2 text-[11px]"
                                     disabled={testing === providerId}
@@ -656,10 +744,43 @@ export default function SettingsPage() {
                                   value={editingProvider.apiKey}
                                 />
                               </div>
+                              {providerId !== GATEWAY_PROVIDER_ID && (
+                                <ModelCheckList
+                                  enabledModels={editingProvider.enabledModels}
+                                  models={saved?.discoveredModels ?? []}
+                                  onAddManual={(modelId) =>
+                                    setEditingProvider({
+                                      ...editingProvider,
+                                      enabledModels: joinModelList([
+                                        ...editingProvider.enabledModels,
+                                        modelId,
+                                      ]),
+                                    })
+                                  }
+                                  onTest={(modelId) =>
+                                    handleTestModel(providerId, modelId)
+                                  }
+                                  onToggle={(modelId) =>
+                                    setEditingProvider({
+                                      ...editingProvider,
+                                      enabledModels: toggleModel(
+                                        editingProvider.enabledModels,
+                                        modelId
+                                      ),
+                                    })
+                                  }
+                                  testingModel={testing}
+                                  title="Discovered models"
+                                />
+                              )}
                               <div className="flex justify-end">
                                 <Button
                                   className="h-8 px-4 text-[12px]"
-                                  disabled={saving || !editingProvider.apiKey}
+                                  disabled={
+                                    saving ||
+                                    (!isConfigured &&
+                                      !editingProvider.apiKey)
+                                  }
                                   onClick={handleSave}
                                 >
                                   {saving ? (
@@ -714,7 +835,10 @@ export default function SettingsPage() {
                                 <span className="font-mono">
                                   {provider.apiKeyMasked}
                                 </span>
-                                <span>{provider.models.length} models</span>
+                                <span>
+                                  {provider.models.length} enabled /{" "}
+                                  {provider.discoveredModels.length} discovered
+                                </span>
                               </div>
                             </div>
                             <div className="flex items-center gap-1.5">
@@ -730,6 +854,23 @@ export default function SettingsPage() {
                                   <Loader2Icon className="mr-1 size-3 animate-spin" />
                                 ) : null}
                                 Test
+                              </Button>
+                              <Button
+                                className="h-7 px-2 text-[11px]"
+                                disabled={
+                                  refreshingModels === provider.providerId
+                                }
+                                onClick={() =>
+                                  handleRefreshModels(provider.providerId)
+                                }
+                                variant="ghost"
+                              >
+                                {refreshingModels === provider.providerId ? (
+                                  <Loader2Icon className="mr-1 size-3 animate-spin" />
+                                ) : (
+                                  <RefreshCwIcon className="mr-1 size-3" />
+                                )}
+                                Refresh candidates
                               </Button>
                               <Button
                                 className="size-7 p-0 text-muted-foreground hover:text-destructive"
@@ -760,8 +901,10 @@ export default function SettingsPage() {
                               editingProvider={editingProvider}
                               isConfigured
                               onSave={handleSave}
+                              onTestModel={handleTestModel}
                               saving={saving}
                               setEditingProvider={setEditingProvider}
+                              testing={testing}
                             />
                           )}
                         </div>
@@ -775,8 +918,10 @@ export default function SettingsPage() {
                             basePath={basePath}
                             editingProvider={editingProvider}
                             onSave={handleSave}
+                            onTestModel={handleTestModel}
                             saving={saving}
                             setEditingProvider={setEditingProvider}
+                            testing={testing}
                           />
                         </div>
                       )}
@@ -795,21 +940,25 @@ function CustomEditor({
   editingProvider,
   basePath,
   isConfigured = false,
+  onTestModel,
   saving,
   setEditingProvider,
+  testing,
   onSave,
 }: {
   editingProvider: Extract<EditingProvider, { mode: "custom" }>;
   basePath: string;
   isConfigured?: boolean;
+  onTestModel: (providerId: string, modelId: string) => void;
   saving: boolean;
   setEditingProvider: Dispatch<SetStateAction<EditingProvider | null>>;
+  testing: string | null;
   onSave: () => void;
 }) {
   const [discovering, setDiscovering] = useState(false);
   const [discoveryStatus, setDiscoveryStatus] = useState<string | null>(null);
   const [hasAttemptedDiscovery, setHasAttemptedDiscovery] = useState(
-    splitModels(editingProvider.manualModels).length > 0
+    editingProvider.discoveredModels.length > 0
   );
   const discoveryRequestId = useRef(0);
 
@@ -865,6 +1014,8 @@ function CustomEditor({
 
         const discoveredModels: string[] = Array.isArray(data?.models)
           ? data.models
+          : Array.isArray(data?.discoveredModels)
+            ? data.discoveredModels
           : [];
         if (discoveredModels.length === 0) {
           const message = data?.warning ?? "No models found from this endpoint";
@@ -885,10 +1036,7 @@ function CustomEditor({
 
           return {
             ...current,
-            manualModels: joinModels([
-              ...splitModels(current.manualModels),
-              ...discoveredModels,
-            ]),
+            discoveredModels,
           };
         });
         setDiscoveryStatus(`Found ${discoveredModels.length} models`);
@@ -959,7 +1107,7 @@ function CustomEditor({
       </div>
       <div className="space-y-1.5">
         <div className="flex items-center justify-between gap-3">
-          <Label className="text-[12px]">Model IDs</Label>
+          <Label className="text-[12px]">Models</Label>
           {hasAttemptedDiscovery && (
             <Button
               className="h-7 px-2 text-[11px]"
@@ -977,37 +1125,57 @@ function CustomEditor({
             </Button>
           )}
         </div>
-        <div className="relative">
-          <Textarea
-            className="min-h-24 font-mono text-[12px]"
-            disabled={!hasAttemptedDiscovery}
-            onChange={(event) =>
+        {hasAttemptedDiscovery ? (
+          <ModelCheckList
+            enabledModels={editingProvider.enabledModels}
+            models={editingProvider.discoveredModels}
+            onAddManual={(modelId) =>
               setEditingProvider({
                 ...editingProvider,
-                manualModels: event.target.value,
+                enabledModels: joinModelList([
+                  ...editingProvider.enabledModels,
+                  modelId,
+                ]),
+                discoveredModels: joinModelList([
+                  ...editingProvider.discoveredModels,
+                  modelId,
+                ]),
               })
             }
-            placeholder={"model-a\nprovider/model-b"}
-            value={editingProvider.manualModels}
+            onTest={(modelId) =>
+              editingProvider.providerId
+                ? onTestModel(editingProvider.providerId, modelId)
+                : undefined
+            }
+            onToggle={(modelId) =>
+              setEditingProvider({
+                ...editingProvider,
+                enabledModels: toggleModel(
+                  editingProvider.enabledModels,
+                  modelId
+                ),
+              })
+            }
+            testingModel={testing}
+            title="Discovered models"
           />
-          {!hasAttemptedDiscovery && (
-            <div className="absolute inset-0 flex items-center justify-center rounded-md border border-border/40 bg-card/80 backdrop-blur-sm">
-              <Button
-                className="h-8 px-3 text-[12px]"
-                disabled={!canDiscover || discovering}
-                onClick={() => discoverModels()}
-                type="button"
-              >
-                {discovering ? (
-                  <Loader2Icon className="mr-1 size-3 animate-spin" />
-                ) : (
-                  <RefreshCwIcon className="mr-1 size-3" />
-                )}
-                Fetch models
-              </Button>
-            </div>
-          )}
-        </div>
+        ) : (
+          <div className="flex min-h-24 items-center justify-center rounded-lg bg-card shadow-[0_0_0_1px_rgba(0,0,0,0.08)]">
+            <Button
+              className="h-8 px-3 text-[12px]"
+              disabled={!canDiscover || discovering}
+              onClick={() => discoverModels()}
+              type="button"
+            >
+              {discovering ? (
+                <Loader2Icon className="mr-1 size-3 animate-spin" />
+              ) : (
+                <RefreshCwIcon className="mr-1 size-3" />
+              )}
+              Fetch models
+            </Button>
+          </div>
+        )}
         {discoveryStatus && (
           <div className="text-[11px] text-muted-foreground">
             {discoveryStatus}
@@ -1021,12 +1189,116 @@ function CustomEditor({
             saving ||
             !editingProvider.displayName ||
             !editingProvider.baseUrl ||
-            !editingProvider.apiKey
+            (!isConfigured && !editingProvider.apiKey)
           }
           onClick={onSave}
         >
           {saving ? <Loader2Icon className="mr-1 size-3 animate-spin" /> : null}
           {isConfigured ? "Update" : "Save"}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function ModelCheckList({
+  enabledModels,
+  models,
+  onAddManual,
+  onTest,
+  onToggle,
+  testingModel,
+  title,
+}: {
+  enabledModels: string[];
+  models: string[];
+  onAddManual: (modelId: string) => void;
+  onTest?: (modelId: string) => void;
+  onToggle: (modelId: string) => void;
+  testingModel: string | null;
+  title: string;
+}) {
+  const [manualModelId, setManualModelId] = useState("");
+  const enabled = new Set(enabledModels);
+  const allModels = joinModelList([...models, ...enabledModels]);
+
+  const handleAdd = () => {
+    const modelId = manualModelId.trim();
+    if (!modelId) {
+      return;
+    }
+    onAddManual(modelId);
+    setManualModelId("");
+  };
+
+  return (
+    <div className="overflow-hidden rounded-lg bg-card shadow-[0_0_0_1px_rgba(0,0,0,0.08)]">
+      <div className="border-border/40 border-b px-3 py-2 text-[12px] text-muted-foreground">
+        {title}
+      </div>
+      <div className="max-h-56 overflow-y-auto">
+        {allModels.length > 0 ? (
+          allModels.map((modelId) => {
+            const isTesting = testingModel?.endsWith(`:${modelId}`);
+            return (
+              <div
+                className="flex min-h-9 items-center gap-2 border-border/30 border-b px-3 last:border-b-0 hover:bg-muted/30"
+                key={modelId}
+              >
+                <input
+                  checked={enabled.has(modelId)}
+                  className="size-3.5 accent-primary"
+                  onChange={() => onToggle(modelId)}
+                  type="checkbox"
+                />
+                <span className="min-w-0 flex-1 truncate font-mono text-[12px]">
+                  {modelId}
+                </span>
+                {onTest && (
+                  <Button
+                    className="h-6 px-2 text-[11px]"
+                    disabled={isTesting}
+                    onClick={() => onTest(modelId)}
+                    type="button"
+                    variant="ghost"
+                  >
+                    {isTesting ? (
+                      <Loader2Icon className="mr-1 size-3 animate-spin" />
+                    ) : null}
+                    Test
+                  </Button>
+                )}
+              </div>
+            );
+          })
+        ) : (
+          <div className="px-3 py-6 text-center text-[12px] text-muted-foreground">
+            Fetch models or add one manually.
+          </div>
+        )}
+      </div>
+      <div className="flex gap-2 border-border/40 border-t p-2">
+        <Input
+          className="h-8 rounded-md font-mono text-[12px]"
+          onChange={(event) => setManualModelId(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              handleAdd();
+            }
+          }}
+          placeholder="Add model ID"
+          value={manualModelId}
+        />
+        <Button
+          className="h-8 px-3 text-[12px]"
+          disabled={!manualModelId.trim()}
+          onClick={handleAdd}
+          type="button"
+          variant="outline"
+        >
+          <PlusIcon className="mr-1 size-3" />
+          Add
         </Button>
       </div>
     </div>

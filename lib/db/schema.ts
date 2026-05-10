@@ -169,6 +169,10 @@ export const userProvider = pgTable(
       .notNull()
       .default("openai-compatible"),
     models: json("models").$type<string[]>().notNull().default([]),
+    discoveredModels: json("discoveredModels")
+      .$type<string[]>()
+      .notNull()
+      .default([]),
     createdAt: timestamp("createdAt").notNull().defaultNow(),
     updatedAt: timestamp("updatedAt").notNull().defaultNow(),
   },

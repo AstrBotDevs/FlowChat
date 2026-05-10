@@ -79,14 +79,26 @@ export const ModelSelectorEmpty = (props: ModelSelectorEmptyProps) => (
 
 export type ModelSelectorGroupProps = ComponentProps<typeof CommandGroup>;
 
-export const ModelSelectorGroup = (props: ModelSelectorGroupProps) => (
-  <CommandGroup {...props} />
+export const ModelSelectorGroup = ({
+  className,
+  ...props
+}: ModelSelectorGroupProps) => (
+  <CommandGroup
+    className={cn("[&_[cmdk-item]+[cmdk-item]]:mt-1", className)}
+    {...props}
+  />
 );
 
 export type ModelSelectorItemProps = ComponentProps<typeof CommandItem>;
 
 export const ModelSelectorItem = ({ className, ...props }: ModelSelectorItemProps) => (
-  <CommandItem className={cn("w-full text-[13px] rounded-lg", className)} {...props} />
+  <CommandItem
+    className={cn(
+      "w-full rounded-lg bg-transparent text-[13px] transition-colors hover:bg-muted/45 hover:text-foreground",
+      className
+    )}
+    {...props}
+  />
 );
 
 export type ModelSelectorShortcutProps = ComponentProps<typeof CommandShortcut>;

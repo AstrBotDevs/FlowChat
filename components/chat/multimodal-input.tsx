@@ -6,7 +6,6 @@ import equal from "fast-deep-equal";
 import {
   ArrowUpIcon,
   BrainIcon,
-  ChevronDownIcon,
   EyeIcon,
   KeyIcon,
   LockIcon,
@@ -658,6 +657,7 @@ type SavedProvider = {
   providerType: string;
   baseUrl: string | null;
   models: string[];
+  discoveredModels?: string[];
 };
 
 type SelectableModel = {
@@ -670,11 +670,27 @@ type SelectableModel = {
   logoProvider: string;
 };
 
-type CustomModelGroup = {
-  providerId: string;
-  displayName: string;
-  models: SelectableModel[];
-};
+function normalizeConfiguredModelId(modelId: string): string {
+  return modelId.replace(/^models\//, "");
+}
+
+function directModelMatchesEnabled(
+  gatewayModelId: string,
+  enabledModels: string[]
+): boolean {
+  const [, ...rest] = gatewayModelId.split("/");
+  const bareGatewayModelId = rest.join("/") || gatewayModelId;
+  const candidates = new Set([
+    gatewayModelId,
+    bareGatewayModelId,
+    normalizeConfiguredModelId(bareGatewayModelId),
+  ]);
+
+  return enabledModels.some((modelId) => {
+    const normalized = normalizeConfiguredModelId(modelId);
+    return candidates.has(modelId) || candidates.has(normalized);
+  });
+}
 
 function PureModelSelectorCompact({
   selectedSelection,
@@ -685,9 +701,6 @@ function PureModelSelectorCompact({
 }) {
   const [open, setOpen] = useState(false);
   const [showMore, setShowMore] = useState(false);
-  const [expandedCustomProviders, setExpandedCustomProviders] = useState<
-    Set<string>
-  >(new Set());
   const { data: modelsData } = useSWR(
     `${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/api/models`,
     (url: string) => fetch(url).then((r) => r.json()),
@@ -705,21 +718,23 @@ function PureModelSelectorCompact({
   const providers: SavedProvider[] = providersData ?? [];
   const {
     availableModels,
-    customModelGroups,
+    customModels,
     standardAvailableModels,
     unavailableModels,
   } = useMemo(() => {
     const gatewayConfigured = providers.some(
       (provider) => provider.providerId === GATEWAY_PROVIDER_ID
     );
-    const directProviderIds = new Set(
-      providers
-        .filter((provider) =>
-          DIRECT_PROVIDER_IDS.includes(
-            provider.providerId as (typeof DIRECT_PROVIDER_IDS)[number]
-          )
-        )
-        .map((provider) => provider.providerId)
+    const directProviders = providers.filter((provider) =>
+      DIRECT_PROVIDER_IDS.includes(
+        provider.providerId as (typeof DIRECT_PROVIDER_IDS)[number]
+      )
+    );
+    const enabledModelsByProvider = new Map(
+      directProviders.map((provider) => [
+        provider.providerId,
+        provider.models ?? [],
+      ])
     );
     const customProviders = providers.filter(
       (provider) => provider.providerType === "openai-compatible"
@@ -729,7 +744,13 @@ function PureModelSelectorCompact({
     );
 
     const directModels: SelectableModel[] = allModels
-      .filter((model) => directProviderIds.has(model.provider))
+      .filter((model) => {
+        const enabledModels = enabledModelsByProvider.get(model.provider);
+        return (
+          Boolean(enabledModels?.length) &&
+          directModelMatchesEnabled(model.id, enabledModels ?? [])
+        );
+      })
       .map((model) => ({
         key: `direct:${model.provider}:${model.id}`,
         selection: {
@@ -759,49 +780,42 @@ function PureModelSelectorCompact({
         }))
       : [];
 
-    const customModelGroups: CustomModelGroup[] = customProviders
-      .map((provider) => {
-        const models: SelectableModel[] = (provider.models ?? []).map(
-          (modelId) => {
-            const [prefix] = modelId.split("/");
-            const inferredProvider =
-              prefix && prefix !== modelId ? prefix : provider.providerId;
-            return {
-              key: `custom:${provider.providerId}:${modelId}`,
-              selection: {
-                source: "custom" as const,
-                providerId: provider.providerId,
-                modelId,
-              },
+    const customModels: SelectableModel[] = customProviders
+      .flatMap((provider) =>
+        (provider.models ?? []).map((modelId) => {
+          const [prefix] = modelId.split("/");
+          const inferredProvider =
+            prefix && prefix !== modelId ? prefix : provider.providerId;
+          return {
+            key: `custom:${provider.providerId}:${modelId}`,
+            selection: {
+              source: "custom" as const,
+              providerId: provider.providerId,
               modelId,
-              name:
-                modelNameById.get(modelId) ??
-                modelId.split("/").pop() ??
-                modelId,
-              provider: inferredProvider,
-              sourceLabel: provider.displayName ?? "Custom",
-              logoProvider: inferredProvider,
-            };
-          }
-        );
-
-        return {
-          providerId: provider.providerId,
-          displayName: provider.displayName ?? provider.providerId,
-          models,
-        };
-      })
-      .filter((group) => group.models.length > 0)
-      .sort((a, b) => a.displayName.localeCompare(b.displayName));
-
-    const customModels = customModelGroups.flatMap((group) => group.models);
+            },
+            modelId,
+            name:
+              modelNameById.get(modelId) ?? modelId.split("/").pop() ?? modelId,
+            provider: inferredProvider,
+            sourceLabel: provider.displayName ?? "Custom",
+            logoProvider: inferredProvider,
+          };
+        })
+      )
+      .sort(
+        (a, b) =>
+          a.sourceLabel.localeCompare(b.sourceLabel) ||
+          a.name.localeCompare(b.name)
+      );
 
     const available = [...directModels, ...gatewayModels, ...customModels];
     const standardAvailable = [...directModels, ...gatewayModels];
     const unavailable: SelectableModel[] = allModels
       .filter(
         (model) =>
-          !directProviderIds.has(model.provider) &&
+          !DIRECT_PROVIDER_IDS.includes(
+            model.provider as (typeof DIRECT_PROVIDER_IDS)[number]
+          ) &&
           !gatewayConfigured &&
           !customModels.some((customModel) => customModel.modelId === model.id)
       )
@@ -821,7 +835,7 @@ function PureModelSelectorCompact({
 
     return {
       availableModels: available,
-      customModelGroups,
+      customModels,
       standardAvailableModels: standardAvailable,
       unavailableModels: unavailable,
     };
@@ -870,25 +884,13 @@ function PureModelSelectorCompact({
     return Object.entries(grouped).sort(([a], [b]) => a.localeCompare(b));
   };
 
-  const toggleCustomProvider = (providerId: string) => {
-    setExpandedCustomProviders((current) => {
-      const next = new Set(current);
-      if (next.has(providerId)) {
-        next.delete(providerId);
-      } else {
-        next.add(providerId);
-      }
-      return next;
-    });
-  };
-
   const renderModelItem = (model: SelectableModel, available: boolean) => {
     return (
       <ModelSelectorItem
         className={cn(
           "flex w-full",
           model.key === selectedModel?.key &&
-            "border-b border-dashed border-foreground/50",
+            "bg-foreground/[0.08] text-foreground shadow-[inset_0_0_0_1px_rgba(0,0,0,0.06)] hover:bg-foreground/[0.1] data-selected:bg-foreground/[0.1]",
           !available && "opacity-40 cursor-default"
         )}
         key={model.key}
@@ -913,7 +915,7 @@ function PureModelSelectorCompact({
         value={model.key}
       >
         <ModelSelectorLogo provider={model.logoProvider} />
-        <ModelSelectorName>{model.name}</ModelSelectorName>
+        <ModelSelectorName title={model.name}>{model.name}</ModelSelectorName>
         <div className="ml-auto flex items-center gap-2 text-foreground/70">
           <span className="rounded-md bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
             {model.sourceLabel}
@@ -963,48 +965,9 @@ function PureModelSelectorCompact({
                 )
               )}
 
-              {customModelGroups.length > 0 && (
+              {customModels.length > 0 && (
                 <ModelSelectorGroup heading="Custom">
-                  <div className="space-y-1">
-                    {customModelGroups.map((group) => {
-                      const expanded = expandedCustomProviders.has(
-                        group.providerId
-                      );
-                      return (
-                        <div key={group.providerId}>
-                          <button
-                            className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[12px] text-muted-foreground hover:bg-muted/60 hover:text-foreground"
-                            onClick={(event) => {
-                              event.preventDefault();
-                              event.stopPropagation();
-                              toggleCustomProvider(group.providerId);
-                            }}
-                            type="button"
-                          >
-                            <ChevronDownIcon
-                              className={cn(
-                                "size-3 transition-transform",
-                                !expanded && "-rotate-90"
-                              )}
-                            />
-                            <span className="flex-1 truncate">
-                              {group.displayName}
-                            </span>
-                            <span className="text-[10px] text-muted-foreground/70">
-                              {group.models.length}
-                            </span>
-                          </button>
-                          {expanded && (
-                            <div className="ml-4">
-                              {group.models.map((m) =>
-                                renderModelItem(m, true)
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
+                  {customModels.map((m) => renderModelItem(m, true))}
                 </ModelSelectorGroup>
               )}
             </>

@@ -877,6 +877,7 @@ export async function upsertUserProvider({
   baseUrl,
   providerType,
   models,
+  discoveredModels,
 }: {
   userId: string;
   providerId: string;
@@ -894,6 +895,7 @@ export async function upsertUserProvider({
     | "gateway"
     | "openai-compatible";
   models?: string[];
+  discoveredModels?: string[];
 }) {
   try {
     return await db
@@ -906,6 +908,7 @@ export async function upsertUserProvider({
         baseUrl,
         providerType,
         models: models ?? [],
+        discoveredModels: discoveredModels ?? [],
         updatedAt: new Date(),
       })
       .onConflictDoUpdate({
@@ -916,6 +919,7 @@ export async function upsertUserProvider({
           baseUrl,
           providerType,
           models: models ?? [],
+          discoveredModels: discoveredModels ?? [],
           updatedAt: new Date(),
         },
       })

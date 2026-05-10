@@ -6,11 +6,13 @@ import {
   isDirectProviderId,
 } from "@/lib/ai/provider-registry";
 import {
+  discoverDirectProviderModels,
   discoverOpenAICompatibleModels,
   normalizeModelIds,
-} from "@/lib/ai/openai-compatible";
+} from "@/lib/ai/model-discovery";
 import {
   deleteUserProvider,
+  getUserProviderByProviderId,
   getUserProviders,
   upsertUserProvider,
 } from "@/lib/db/queries";
@@ -39,6 +41,7 @@ export async function GET() {
     providerType: p.providerType,
     baseUrl: p.baseUrl,
     models: p.models ?? [],
+    discoveredModels: p.discoveredModels ?? [],
     apiKeyMasked: maskApiKey(p.apiKey),
     createdAt: p.createdAt,
     updatedAt: p.updatedAt,
@@ -62,8 +65,9 @@ const providerTypeSchema = z.enum([
 const upsertSchema = z.object({
   providerId: z.string().min(1).max(64).optional(),
   displayName: z.string().min(1).max(80).optional(),
-  apiKey: z.string().min(1),
+  apiKey: z.string().min(1).optional(),
   baseUrl: z.string().url().nullable().optional(),
+  enabledModels: z.array(z.string().min(1).max(200)).optional(),
   manualModels: z.array(z.string().min(1).max(200)).optional(),
   providerType: providerTypeSchema,
 });
@@ -85,8 +89,19 @@ export async function POST(request: Request) {
   let providerId = body.providerId;
   let baseUrl = body.baseUrl ?? null;
   let displayName = body.displayName ?? null;
-  let models = normalizeModelIds(body.manualModels ?? []);
+  const existingProvider = providerId
+    ? await getUserProviderByProviderId({
+        userId: session.user.id,
+        providerId,
+      })
+    : null;
+  let models = normalizeModelIds([
+    ...(body.enabledModels ?? []),
+    ...(body.manualModels ?? []),
+  ]);
+  let discoveredModels: string[] = [];
   let warning: string | undefined;
+  let apiKey = body.apiKey;
 
   if (body.providerType === "openai-compatible") {
     if (!body.baseUrl || !body.displayName) {
@@ -99,17 +114,45 @@ export async function POST(request: Request) {
     providerId = providerId?.startsWith("custom_")
       ? providerId
       : `custom_${generateUUID().slice(0, 8)}`;
-    const discovered = await discoverOpenAICompatibleModels({
-      baseUrl: body.baseUrl,
-      apiKey: body.apiKey,
-    });
-    models = normalizeModelIds([...models, ...discovered.models]);
-    warning = discovered.warning;
+    const customExistingProvider =
+      existingProvider ??
+      (providerId
+        ? await getUserProviderByProviderId({
+            userId: session.user.id,
+            providerId,
+          })
+        : null);
+    apiKey = apiKey ?? customExistingProvider?.apiKey;
+    if (!apiKey) {
+      return new ChatbotError("bad_request:api").toResponse();
+    }
+    if (!body.enabledModels && !body.manualModels && customExistingProvider) {
+      models = customExistingProvider.models ?? [];
+    }
+    if (body.apiKey || body.baseUrl !== customExistingProvider?.baseUrl) {
+      const discovered = await discoverOpenAICompatibleModels({
+        baseUrl: body.baseUrl,
+        apiKey,
+      });
+      discoveredModels = discovered.models;
+      warning = discovered.warning;
+    } else {
+      discoveredModels = customExistingProvider?.discoveredModels ?? [];
+    }
   } else if (body.providerType === "gateway") {
     providerId = GATEWAY_PROVIDER_ID;
+    const gatewayExistingProvider = await getUserProviderByProviderId({
+      userId: session.user.id,
+      providerId,
+    });
+    apiKey = apiKey ?? gatewayExistingProvider?.apiKey;
+    if (!apiKey) {
+      return new ChatbotError("bad_request:api").toResponse();
+    }
     baseUrl = null;
     displayName = null;
     models = [];
+    discoveredModels = [];
   } else {
     if (!providerId || !isDirectProviderId(providerId)) {
       return new ChatbotError("bad_request:api").toResponse();
@@ -118,19 +161,40 @@ export async function POST(request: Request) {
       return new ChatbotError("bad_request:api").toResponse();
     }
     providerId = body.providerType;
+    const directExistingProvider = await getUserProviderByProviderId({
+      userId: session.user.id,
+      providerId,
+    });
+    apiKey = apiKey ?? directExistingProvider?.apiKey;
+    if (!apiKey) {
+      return new ChatbotError("bad_request:api").toResponse();
+    }
+    if (!body.enabledModels && directExistingProvider) {
+      models = directExistingProvider.models ?? [];
+    }
     baseUrl = null;
     displayName = null;
-    models = [];
+    if (body.apiKey) {
+      const discovered = await discoverDirectProviderModels({
+        providerType: body.providerType,
+        apiKey,
+      });
+      discoveredModels = discovered.models;
+      warning = discovered.warning;
+    } else {
+      discoveredModels = directExistingProvider?.discoveredModels ?? [];
+    }
   }
 
   const result = await upsertUserProvider({
     userId: session.user.id,
     providerId,
     displayName,
-    apiKey: body.apiKey,
+    apiKey: apiKey ?? "",
     baseUrl,
     providerType: body.providerType,
     models,
+    discoveredModels,
   });
 
   return Response.json({
@@ -140,6 +204,7 @@ export async function POST(request: Request) {
     providerType: result[0].providerType,
     baseUrl: result[0].baseUrl,
     models: result[0].models ?? [],
+    discoveredModels: result[0].discoveredModels ?? [],
     apiKeyMasked: maskApiKey(result[0].apiKey),
     warning,
   });
