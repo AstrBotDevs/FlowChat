@@ -6,6 +6,7 @@ import equal from "fast-deep-equal";
 import {
   ArrowUpIcon,
   BrainIcon,
+  ChevronDownIcon,
   EyeIcon,
   KeyIcon,
   LockIcon,
@@ -669,6 +670,12 @@ type SelectableModel = {
   logoProvider: string;
 };
 
+type CustomModelGroup = {
+  providerId: string;
+  displayName: string;
+  models: SelectableModel[];
+};
+
 function PureModelSelectorCompact({
   selectedSelection,
   onModelChange,
@@ -678,6 +685,9 @@ function PureModelSelectorCompact({
 }) {
   const [open, setOpen] = useState(false);
   const [showMore, setShowMore] = useState(false);
+  const [expandedCustomProviders, setExpandedCustomProviders] = useState<
+    Set<string>
+  >(new Set());
   const { data: modelsData } = useSWR(
     `${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/api/models`,
     (url: string) => fetch(url).then((r) => r.json()),
@@ -693,7 +703,12 @@ function PureModelSelectorCompact({
     modelsData?.capabilities;
   const allModels: ChatModel[] = modelsData?.models ?? [];
   const providers: SavedProvider[] = providersData ?? [];
-  const { availableModels, unavailableModels } = useMemo(() => {
+  const {
+    availableModels,
+    customModelGroups,
+    standardAvailableModels,
+    unavailableModels,
+  } = useMemo(() => {
     const gatewayConfigured = providers.some(
       (provider) => provider.providerId === GATEWAY_PROVIDER_ID
     );
@@ -744,30 +759,45 @@ function PureModelSelectorCompact({
         }))
       : [];
 
-    const customModels: SelectableModel[] = customProviders.flatMap(
-      (provider) =>
-        (provider.models ?? []).map((modelId) => {
-          const [prefix] = modelId.split("/");
-          const inferredProvider =
-            prefix && prefix !== modelId ? prefix : provider.providerId;
-          return {
-            key: `custom:${provider.providerId}:${modelId}`,
-            selection: {
-              source: "custom" as const,
-              providerId: provider.providerId,
+    const customModelGroups: CustomModelGroup[] = customProviders
+      .map((provider) => {
+        const models: SelectableModel[] = (provider.models ?? []).map(
+          (modelId) => {
+            const [prefix] = modelId.split("/");
+            const inferredProvider =
+              prefix && prefix !== modelId ? prefix : provider.providerId;
+            return {
+              key: `custom:${provider.providerId}:${modelId}`,
+              selection: {
+                source: "custom" as const,
+                providerId: provider.providerId,
+                modelId,
+              },
               modelId,
-            },
-            modelId,
-            name:
-              modelNameById.get(modelId) ?? modelId.split("/").pop() ?? modelId,
-            provider: inferredProvider,
-            sourceLabel: provider.displayName ?? "Custom",
-            logoProvider: inferredProvider,
-          };
-        })
-    );
+              name:
+                modelNameById.get(modelId) ??
+                modelId.split("/").pop() ??
+                modelId,
+              provider: inferredProvider,
+              sourceLabel: provider.displayName ?? "Custom",
+              logoProvider: inferredProvider,
+            };
+          }
+        );
+
+        return {
+          providerId: provider.providerId,
+          displayName: provider.displayName ?? provider.providerId,
+          models,
+        };
+      })
+      .filter((group) => group.models.length > 0)
+      .sort((a, b) => a.displayName.localeCompare(b.displayName));
+
+    const customModels = customModelGroups.flatMap((group) => group.models);
 
     const available = [...directModels, ...gatewayModels, ...customModels];
+    const standardAvailable = [...directModels, ...gatewayModels];
     const unavailable: SelectableModel[] = allModels
       .filter(
         (model) =>
@@ -789,7 +819,12 @@ function PureModelSelectorCompact({
         logoProvider: model.id.split("/")[0],
       }));
 
-    return { availableModels: available, unavailableModels: unavailable };
+    return {
+      availableModels: available,
+      customModelGroups,
+      standardAvailableModels: standardAvailable,
+      unavailableModels: unavailable,
+    };
   }, [allModels, providers]);
 
   const selectedModel =
@@ -833,6 +868,18 @@ function PureModelSelectorCompact({
       grouped[model.provider].push(model);
     }
     return Object.entries(grouped).sort(([a], [b]) => a.localeCompare(b));
+  };
+
+  const toggleCustomProvider = (providerId: string) => {
+    setExpandedCustomProviders((current) => {
+      const next = new Set(current);
+      if (next.has(providerId)) {
+        next.delete(providerId);
+      } else {
+        next.add(providerId);
+      }
+      return next;
+    });
   };
 
   const renderModelItem = (model: SelectableModel, available: boolean) => {
@@ -904,14 +951,63 @@ function PureModelSelectorCompact({
         <ModelSelectorInput placeholder="Search models..." />
         <ModelSelectorList>
           {availableModels.length > 0 ? (
-            groupByProvider(availableModels).map(([prov, models]) => (
-              <ModelSelectorGroup
-                heading={KNOWN_PROVIDERS[prov]?.name ?? prov}
-                key={prov}
-              >
-                {models.map((m) => renderModelItem(m, true))}
-              </ModelSelectorGroup>
-            ))
+            <>
+              {groupByProvider(standardAvailableModels).map(
+                ([prov, models]) => (
+                  <ModelSelectorGroup
+                    heading={KNOWN_PROVIDERS[prov]?.name ?? prov}
+                    key={prov}
+                  >
+                    {models.map((m) => renderModelItem(m, true))}
+                  </ModelSelectorGroup>
+                )
+              )}
+
+              {customModelGroups.length > 0 && (
+                <ModelSelectorGroup heading="Custom">
+                  <div className="space-y-1">
+                    {customModelGroups.map((group) => {
+                      const expanded = expandedCustomProviders.has(
+                        group.providerId
+                      );
+                      return (
+                        <div key={group.providerId}>
+                          <button
+                            className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[12px] text-muted-foreground hover:bg-muted/60 hover:text-foreground"
+                            onClick={(event) => {
+                              event.preventDefault();
+                              event.stopPropagation();
+                              toggleCustomProvider(group.providerId);
+                            }}
+                            type="button"
+                          >
+                            <ChevronDownIcon
+                              className={cn(
+                                "size-3 transition-transform",
+                                !expanded && "-rotate-90"
+                              )}
+                            />
+                            <span className="flex-1 truncate">
+                              {group.displayName}
+                            </span>
+                            <span className="text-[10px] text-muted-foreground/70">
+                              {group.models.length}
+                            </span>
+                          </button>
+                          {expanded && (
+                            <div className="ml-4">
+                              {group.models.map((m) =>
+                                renderModelItem(m, true)
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </ModelSelectorGroup>
+              )}
+            </>
           ) : (
             <ModelSelectorGroup heading="No providers configured">
               <div className="px-3 py-2 text-[12px] text-muted-foreground">

@@ -6,13 +6,22 @@ import {
   DownloadIcon,
   Loader2Icon,
   PlusIcon,
+  RefreshCwIcon,
   SaveIcon,
   TrashIcon,
   XCircleIcon,
 } from "lucide-react";
 import Link from "next/link";
 import { signOut, useSession } from "next-auth/react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  type Dispatch,
+  type SetStateAction,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -61,6 +70,21 @@ function splitModels(value: string): string[] {
     .split(/[\n,]/)
     .map((model) => model.trim())
     .filter(Boolean);
+}
+
+function joinModels(models: string[]): string {
+  return Array.from(new Set(models))
+    .sort((a, b) => a.localeCompare(b))
+    .join("\n");
+}
+
+function isValidHttpUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:";
+  } catch {
+    return false;
+  }
 }
 
 export default function SettingsPage() {
@@ -732,6 +756,7 @@ export default function SettingsPage() {
 
                           {isEditing && editingProvider.mode === "custom" && (
                             <CustomEditor
+                              basePath={basePath}
                               editingProvider={editingProvider}
                               isConfigured
                               onSave={handleSave}
@@ -747,6 +772,7 @@ export default function SettingsPage() {
                       !editingProvider.providerId && (
                         <div className="rounded-lg border border-border/50 bg-card/50">
                           <CustomEditor
+                            basePath={basePath}
                             editingProvider={editingProvider}
                             onSave={handleSave}
                             saving={saving}
@@ -767,17 +793,123 @@ export default function SettingsPage() {
 
 function CustomEditor({
   editingProvider,
+  basePath,
   isConfigured = false,
   saving,
   setEditingProvider,
   onSave,
 }: {
   editingProvider: Extract<EditingProvider, { mode: "custom" }>;
+  basePath: string;
   isConfigured?: boolean;
   saving: boolean;
-  setEditingProvider: (provider: EditingProvider) => void;
+  setEditingProvider: Dispatch<SetStateAction<EditingProvider | null>>;
   onSave: () => void;
 }) {
+  const [discovering, setDiscovering] = useState(false);
+  const [discoveryStatus, setDiscoveryStatus] = useState<string | null>(null);
+  const [hasAttemptedDiscovery, setHasAttemptedDiscovery] = useState(
+    splitModels(editingProvider.manualModels).length > 0
+  );
+  const discoveryRequestId = useRef(0);
+
+  const canDiscover = Boolean(
+    isValidHttpUrl(editingProvider.baseUrl.trim()) &&
+      editingProvider.apiKey.trim()
+  );
+
+  const discoverModels = useCallback(
+    async ({ silent = false }: { silent?: boolean } = {}) => {
+      const baseUrl = editingProvider.baseUrl.trim();
+      const apiKey = editingProvider.apiKey.trim();
+      const requestKey = `${baseUrl}::${apiKey}`;
+      const requestId = discoveryRequestId.current + 1;
+
+      if (!baseUrl || !apiKey) {
+        if (!silent) {
+          toast.error("Enter Base URL and API Key first");
+        }
+        return;
+      }
+
+      discoveryRequestId.current = requestId;
+      setDiscovering(true);
+      setDiscoveryStatus(null);
+
+      try {
+        const res = await fetch(`${basePath}/api/providers/discover`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ baseUrl, apiKey }),
+        });
+        const data = await res.json().catch(() => null);
+
+        if (
+          discoveryRequestId.current !== requestId ||
+          `${editingProvider.baseUrl.trim()}::${editingProvider.apiKey.trim()}` !==
+            requestKey
+        ) {
+          return;
+        }
+
+        setHasAttemptedDiscovery(true);
+
+        if (!res.ok) {
+          const message = data?.message ?? "Failed to read model list";
+          setDiscoveryStatus(message);
+          if (!silent) {
+            toast.error(message);
+          }
+          return;
+        }
+
+        const discoveredModels: string[] = Array.isArray(data?.models)
+          ? data.models
+          : [];
+        if (discoveredModels.length === 0) {
+          const message = data?.warning ?? "No models found from this endpoint";
+          setDiscoveryStatus(message);
+          if (!silent) {
+            toast.warning(message);
+          }
+          return;
+        }
+
+        setEditingProvider((current) => {
+          if (
+            current?.mode !== "custom" ||
+            `${current.baseUrl.trim()}::${current.apiKey.trim()}` !== requestKey
+          ) {
+            return current;
+          }
+
+          return {
+            ...current,
+            manualModels: joinModels([
+              ...splitModels(current.manualModels),
+              ...discoveredModels,
+            ]),
+          };
+        });
+        setDiscoveryStatus(`Found ${discoveredModels.length} models`);
+        if (!silent) {
+          toast.success(`Found ${discoveredModels.length} models`);
+        }
+      } catch {
+        setHasAttemptedDiscovery(true);
+        setDiscoveryStatus("Failed to read model list");
+        if (!silent) {
+          toast.error("Failed to read model list");
+        }
+      } finally {
+        if (discoveryRequestId.current === requestId) {
+          setDiscovering(false);
+        }
+      }
+    },
+    [basePath, editingProvider, setEditingProvider]
+  );
+
   return (
     <div className="space-y-3 border-t border-border/30 px-4 py-3">
       <div className="grid gap-3 md:grid-cols-2">
@@ -826,18 +958,61 @@ function CustomEditor({
         />
       </div>
       <div className="space-y-1.5">
-        <Label className="text-[12px]">Model IDs</Label>
-        <Textarea
-          className="min-h-24 font-mono text-[12px]"
-          onChange={(event) =>
-            setEditingProvider({
-              ...editingProvider,
-              manualModels: event.target.value,
-            })
-          }
-          placeholder={"model-a\nprovider/model-b"}
-          value={editingProvider.manualModels}
-        />
+        <div className="flex items-center justify-between gap-3">
+          <Label className="text-[12px]">Model IDs</Label>
+          {hasAttemptedDiscovery && (
+            <Button
+              className="h-7 px-2 text-[11px]"
+              disabled={!canDiscover || discovering}
+              onClick={() => discoverModels()}
+              type="button"
+              variant="ghost"
+            >
+              {discovering ? (
+                <Loader2Icon className="mr-1 size-3 animate-spin" />
+              ) : (
+                <RefreshCwIcon className="mr-1 size-3" />
+              )}
+              Fetch models
+            </Button>
+          )}
+        </div>
+        <div className="relative">
+          <Textarea
+            className="min-h-24 font-mono text-[12px]"
+            disabled={!hasAttemptedDiscovery}
+            onChange={(event) =>
+              setEditingProvider({
+                ...editingProvider,
+                manualModels: event.target.value,
+              })
+            }
+            placeholder={"model-a\nprovider/model-b"}
+            value={editingProvider.manualModels}
+          />
+          {!hasAttemptedDiscovery && (
+            <div className="absolute inset-0 flex items-center justify-center rounded-md border border-border/40 bg-card/80 backdrop-blur-sm">
+              <Button
+                className="h-8 px-3 text-[12px]"
+                disabled={!canDiscover || discovering}
+                onClick={() => discoverModels()}
+                type="button"
+              >
+                {discovering ? (
+                  <Loader2Icon className="mr-1 size-3 animate-spin" />
+                ) : (
+                  <RefreshCwIcon className="mr-1 size-3" />
+                )}
+                Fetch models
+              </Button>
+            </div>
+          )}
+        </div>
+        {discoveryStatus && (
+          <div className="text-[11px] text-muted-foreground">
+            {discoveryStatus}
+          </div>
+        )}
       </div>
       <div className="flex justify-end">
         <Button
