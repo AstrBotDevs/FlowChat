@@ -3,8 +3,6 @@
 import {
   autoUpdate,
   flip,
-  hide,
-  inline,
   offset,
   shift,
   useFloating,
@@ -15,40 +13,41 @@ import { useEffect } from "react";
 import { createPortal } from "react-dom";
 
 export function FollowUpButton({
-  range,
+  mouseClient,
   onFollowUp,
   visible,
 }: {
-  range: Range;
+  mouseClient: { x: number; y: number };
   onFollowUp: () => void;
   visible: boolean;
 }) {
-  const { refs, floatingStyles, middlewareData } = useFloating({
-    placement: "bottom",
+  const { refs, floatingStyles } = useFloating({
+    placement: "top",
     strategy: "fixed",
     transform: false,
-    middleware: [
-      inline(),
-      offset(6),
-      flip({ padding: 8 }),
-      shift({ padding: 8 }),
-      hide(),
-    ],
+    middleware: [offset(8), flip({ padding: 8 }), shift({ padding: 8 })],
     whileElementsMounted: autoUpdate,
   });
 
   useEffect(() => {
     refs.setReference({
-      getBoundingClientRect: () => range.getBoundingClientRect(),
-      getClientRects: () => range.getClientRects(),
+      getBoundingClientRect: () => ({
+        x: mouseClient.x,
+        y: mouseClient.y,
+        top: mouseClient.y,
+        left: mouseClient.x,
+        right: mouseClient.x,
+        bottom: mouseClient.y,
+        width: 0,
+        height: 0,
+        toJSON: () => ({}),
+      }),
     });
-  }, [range, refs]);
-
-  const hidden = middlewareData.hide?.referenceHidden;
+  }, [mouseClient, refs]);
 
   return createPortal(
     <AnimatePresence>
-      {visible && !hidden && (
+      {visible && (
         <motion.button
           animate={{ opacity: 1, y: 0 }}
           className="flex items-center gap-1.5 rounded-lg border border-border/50 bg-background px-2.5 py-1.5 text-xs font-medium text-foreground shadow-md transition-colors hover:bg-accent"

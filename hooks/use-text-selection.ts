@@ -7,6 +7,7 @@ export type TextSelectionState = {
   range: Range;
   messageId: string;
   isActive: boolean;
+  mouseClient: { x: number; y: number };
 };
 
 const SELECTION_DELAY_MS = 150;
@@ -41,7 +42,9 @@ export function useTextSelection(
       return;
     }
 
-    const handleMouseUp = () => {
+    const handleMouseUp = (e: MouseEvent) => {
+      const mouseClient = { x: e.clientX, y: e.clientY };
+
       if (timerRef.current) {
         clearTimeout(timerRef.current);
       }
@@ -84,6 +87,7 @@ export function useTextSelection(
           range: range.cloneRange(),
           messageId,
           isActive: true,
+          mouseClient,
         });
       }, SELECTION_DELAY_MS);
     };

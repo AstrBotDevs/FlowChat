@@ -438,8 +438,8 @@ const PurePreviewMessage = ({
     <>
       {selection?.isActive && (
         <FollowUpButton
+          mouseClient={selection.mouseClient}
           onFollowUp={handleFollowUp}
-          range={selection.range}
           visible
         />
       )}
