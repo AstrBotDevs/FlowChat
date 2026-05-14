@@ -115,13 +115,8 @@ const PurePreviewMessage = ({
       return;
     }
 
-    const sel = window.getSelection();
-    if (!sel || sel.rangeCount === 0) {
-      return;
-    }
-
-    const range = sel.getRangeAt(0).cloneRange();
-    sel.removeAllRanges();
+    const range = selection.range.cloneRange();
+    window.getSelection()?.removeAllRanges();
 
     setActivePopover({
       quoteText: selection.text,
@@ -444,7 +439,7 @@ const PurePreviewMessage = ({
       {selection?.isActive && (
         <FollowUpButton
           onFollowUp={handleFollowUp}
-          selectionRect={selection.rect}
+          range={selection.range}
           visible
         />
       )}

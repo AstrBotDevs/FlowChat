@@ -1,24 +1,54 @@
 "use client";
 
+import {
+  autoUpdate,
+  flip,
+  hide,
+  inline,
+  offset,
+  shift,
+  useFloating,
+} from "@floating-ui/react-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import { MessageSquareQuote } from "lucide-react";
+import { useEffect } from "react";
 import { createPortal } from "react-dom";
 
 export function FollowUpButton({
-  selectionRect,
+  range,
   onFollowUp,
   visible,
 }: {
-  selectionRect: DOMRect;
+  range: Range;
   onFollowUp: () => void;
   visible: boolean;
 }) {
-  const top = selectionRect.bottom + 6;
-  const left = selectionRect.left + selectionRect.width / 2;
+  const { refs, floatingStyles, middlewareData } = useFloating({
+    placement: "bottom",
+    strategy: "fixed",
+    transform: false,
+    middleware: [
+      inline(),
+      offset(6),
+      flip({ padding: 8 }),
+      shift({ padding: 8 }),
+      hide(),
+    ],
+    whileElementsMounted: autoUpdate,
+  });
 
-  const content = (
+  useEffect(() => {
+    refs.setReference({
+      getBoundingClientRect: () => range.getBoundingClientRect(),
+      getClientRects: () => range.getClientRects(),
+    });
+  }, [range, refs]);
+
+  const hidden = middlewareData.hide?.referenceHidden;
+
+  return createPortal(
     <AnimatePresence>
-      {visible && (
+      {visible && !hidden && (
         <motion.button
           animate={{ opacity: 1, y: 0 }}
           className="flex items-center gap-1.5 rounded-lg border border-border/50 bg-background px-2.5 py-1.5 text-xs font-medium text-foreground shadow-md transition-colors hover:bg-accent"
@@ -29,13 +59,8 @@ export function FollowUpButton({
             e.stopPropagation();
             onFollowUp();
           }}
-          style={{
-            position: "fixed",
-            top,
-            left,
-            transform: "translateX(-50%)",
-            zIndex: 9998,
-          }}
+          ref={refs.setFloating}
+          style={{ ...floatingStyles, zIndex: 9998 }}
           transition={{ duration: 0.15 }}
           type="button"
         >
@@ -43,8 +68,7 @@ export function FollowUpButton({
           <span>追问</span>
         </motion.button>
       )}
-    </AnimatePresence>
+    </AnimatePresence>,
+    document.body
   );
-
-  return createPortal(content, document.body);
 }

@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 export type TextSelectionState = {
   text: string;
-  rect: DOMRect;
+  range: Range;
   messageId: string;
   isActive: boolean;
 };
@@ -79,9 +79,12 @@ export function useTextSelection(
           container.getAttribute("data-message-id") ??
           "";
 
-        const rect = range.getBoundingClientRect();
-
-        setSelection({ text, rect, messageId, isActive: true });
+        setSelection({
+          text,
+          range: range.cloneRange(),
+          messageId,
+          isActive: true,
+        });
       }, SELECTION_DELAY_MS);
     };
 
@@ -100,12 +103,12 @@ export function useTextSelection(
       }
     };
 
-    container.addEventListener("mouseup", handleMouseUp);
+    document.addEventListener("mouseup", handleMouseUp);
     document.addEventListener("mousedown", handleMouseDown);
     document.addEventListener("scroll", handleScroll, true);
 
     return () => {
-      container.removeEventListener("mouseup", handleMouseUp);
+      document.removeEventListener("mouseup", handleMouseUp);
       document.removeEventListener("mousedown", handleMouseDown);
       document.removeEventListener("scroll", handleScroll, true);
       if (timerRef.current) {

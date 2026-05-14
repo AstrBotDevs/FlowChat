@@ -1,5 +1,15 @@
 "use client";
 
+import {
+  autoUpdate,
+  flip,
+  hide,
+  inline,
+  offset,
+  shift,
+  size,
+  useFloating,
+} from "@floating-ui/react-dom";
 import { motion } from "framer-motion";
 import {
   ArrowLeft,
@@ -35,7 +45,6 @@ export type PopoverBreadcrumb = {
 
 const POPOVER_WIDTH = 380;
 const POPOVER_MAX_HEIGHT = 400;
-const GAP = 8;
 
 export type FollowUpPopoverAnchor =
   | { kind: "range"; range: Range }
@@ -46,93 +55,6 @@ function getThreadMessageText(message: ThreadMessageItem) {
     .filter((part) => part.type === "text")
     .map((part) => part.text)
     .join("");
-}
-
-function getAnchorRect(anchor: FollowUpPopoverAnchor): DOMRect | null {
-  if (anchor.kind === "range") {
-    const r = anchor.range.getBoundingClientRect();
-    if (r.width === 0 && r.height === 0) {
-      return null;
-    }
-    return r;
-  }
-  const el = document.querySelector(
-    `[data-anchor-quote-id="${anchor.quoteId}"]`
-  );
-  return (el as HTMLElement | null)?.getBoundingClientRect() ?? null;
-}
-
-function useAnchorPosition(
-  anchor: FollowUpPopoverAnchor,
-  popoverEl: HTMLDivElement | null
-) {
-  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
-
-  useEffect(() => {
-    let raf = 0;
-
-    const update = () => {
-      const rect = getAnchorRect(anchor);
-      if (!rect) {
-        return;
-      }
-
-      const popoverRect = popoverEl?.getBoundingClientRect();
-      const popoverHeight = popoverRect?.height ?? POPOVER_MAX_HEIGHT;
-      const popoverWidth = popoverRect?.width ?? POPOVER_WIDTH;
-
-      const vw = window.innerWidth;
-      const vh = window.innerHeight;
-
-      const anchorCenterX = rect.left + rect.width / 2;
-      const left = Math.max(
-        GAP,
-        Math.min(anchorCenterX - popoverWidth / 2, vw - popoverWidth - GAP)
-      );
-
-      const spaceBelow = vh - rect.bottom - GAP;
-      const spaceAbove = rect.top - GAP;
-      const flip = spaceBelow < popoverHeight && spaceAbove > spaceBelow;
-
-      const top = flip
-        ? Math.max(GAP, rect.top - popoverHeight - GAP)
-        : Math.min(rect.bottom + GAP, vh - popoverHeight - GAP);
-
-      setPos((prev) => {
-        if (prev && prev.top === top && prev.left === left) {
-          return prev;
-        }
-        return { top, left };
-      });
-    };
-
-    const tick = () => {
-      cancelAnimationFrame(raf);
-      raf = requestAnimationFrame(update);
-    };
-
-    update();
-
-    document.addEventListener("scroll", tick, true);
-    window.addEventListener("resize", tick);
-    window.visualViewport?.addEventListener("resize", tick);
-
-    let ro: ResizeObserver | null = null;
-    if (popoverEl && typeof ResizeObserver !== "undefined") {
-      ro = new ResizeObserver(tick);
-      ro.observe(popoverEl);
-    }
-
-    return () => {
-      cancelAnimationFrame(raf);
-      document.removeEventListener("scroll", tick, true);
-      window.removeEventListener("resize", tick);
-      window.visualViewport?.removeEventListener("resize", tick);
-      ro?.disconnect();
-    };
-  }, [anchor, popoverEl]);
-
-  return pos;
 }
 
 export function FollowUpPopover({
@@ -172,9 +94,46 @@ export function FollowUpPopover({
 
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const conversationRef = useRef<HTMLDivElement>(null);
-  const [popoverEl, setPopoverEl] = useState<HTMLDivElement | null>(null);
 
-  const pos = useAnchorPosition(anchor, popoverEl);
+  const { refs, floatingStyles, middlewareData, isPositioned } = useFloating({
+    placement: "bottom",
+    strategy: "fixed",
+    transform: false,
+    middleware: [
+      inline(),
+      offset(8),
+      flip({ padding: 8 }),
+      shift({ padding: 8 }),
+      hide(),
+      size({
+        apply({ availableHeight, elements }) {
+          elements.floating.style.maxHeight = `${Math.min(
+            POPOVER_MAX_HEIGHT,
+            Math.max(180, availableHeight - 8)
+          )}px`;
+        },
+        padding: 8,
+      }),
+    ],
+    whileElementsMounted: autoUpdate,
+  });
+
+  useEffect(() => {
+    if (anchor.kind === "range") {
+      const { range } = anchor;
+      refs.setReference({
+        getBoundingClientRect: () => range.getBoundingClientRect(),
+        getClientRects: () => range.getClientRects(),
+      });
+      return;
+    }
+    const el = document.querySelector(
+      `[data-anchor-quote-id="${anchor.quoteId}"]`
+    );
+    if (el) {
+      refs.setReference(el as HTMLElement);
+    }
+  }, [anchor, refs]);
 
   const {
     messages,
@@ -215,7 +174,8 @@ export function FollowUpPopover({
     };
 
     const handleClickOutside = (e: MouseEvent) => {
-      if (popoverEl && !popoverEl.contains(e.target as Node)) {
+      const floating = refs.floating.current;
+      if (floating && !floating.contains(e.target as Node)) {
         onClose(messages.length > 0);
       }
     };
@@ -230,7 +190,7 @@ export function FollowUpPopover({
       document.removeEventListener("mousedown", handleClickOutside);
       clearTimeout(timer);
     };
-  }, [onClose, messages.length, popoverEl]);
+  }, [onClose, messages.length, refs.floating]);
 
   const handleSend = useCallback(() => {
     const text = inputValue.trim();
@@ -303,7 +263,7 @@ export function FollowUpPopover({
   const [nestedSelection, setNestedSelection] = useState<{
     text: string;
     msgId: string;
-    rect: DOMRect;
+    range: Range;
   } | null>(null);
 
   const handleNestedMouseUp = useCallback(() => {
@@ -329,15 +289,12 @@ export function FollowUpPopover({
         return;
       }
       const msgId = bubble.getAttribute("data-thread-msg-id") ?? "";
-      setNestedSelection({ text, msgId, rect: range.getBoundingClientRect() });
+      setNestedSelection({ text, msgId, range: range.cloneRange() });
     }, 100);
   }, []);
 
   const hasConversation = messages.length > 0;
-
-  if (!pos) {
-    return null;
-  }
+  const referenceHidden = middlewareData.hide?.referenceHidden;
 
   const popoverContent = (
     <motion.div
@@ -345,14 +302,12 @@ export function FollowUpPopover({
       className="flex flex-col overflow-hidden rounded-xl border border-border/60 bg-background shadow-xl"
       exit={{ opacity: 0, y: 4, scale: 0.98 }}
       initial={{ opacity: 0, y: 8, scale: 0.96 }}
-      ref={setPopoverEl}
+      ref={refs.setFloating}
       style={{
-        position: "fixed",
-        top: pos.top,
-        left: pos.left,
+        ...floatingStyles,
         width: POPOVER_WIDTH,
-        maxHeight: POPOVER_MAX_HEIGHT,
         zIndex: 9999,
+        visibility: referenceHidden ? "hidden" : "visible",
       }}
       transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
     >
@@ -431,30 +386,6 @@ export function FollowUpPopover({
               onAnchorClick={handleExistingNestedAnchor}
             />
           ))}
-
-          {nestedSelection && status !== "streaming" && (
-            <button
-              className="fixed z-[10000] flex items-center gap-1 rounded-md border border-border/50 bg-background px-2 py-1 text-[10px] font-medium text-foreground shadow-md hover:bg-accent"
-              onClick={() => {
-                handleNestedFollowUp(
-                  nestedSelection.text,
-                  nestedSelection.msgId
-                );
-                setNestedSelection(null);
-                window.getSelection()?.removeAllRanges();
-              }}
-              style={{
-                top: nestedSelection.rect.bottom + 4,
-                left:
-                  nestedSelection.rect.left + nestedSelection.rect.width / 2,
-                transform: "translateX(-50%)",
-              }}
-              type="button"
-            >
-              <MessageSquareQuote className="size-3" />
-              追问
-            </button>
-          )}
         </div>
       </div>
 
@@ -499,7 +430,68 @@ export function FollowUpPopover({
     </motion.div>
   );
 
-  return createPortal(popoverContent, document.body);
+  return createPortal(
+    <>
+      {isPositioned && popoverContent}
+      {nestedSelection && status !== "streaming" && (
+        <NestedFollowUpButton
+          onConfirm={() => {
+            handleNestedFollowUp(nestedSelection.text, nestedSelection.msgId);
+            setNestedSelection(null);
+            window.getSelection()?.removeAllRanges();
+          }}
+          range={nestedSelection.range}
+        />
+      )}
+    </>,
+    document.body
+  );
+}
+
+function NestedFollowUpButton({
+  range,
+  onConfirm,
+}: {
+  range: Range;
+  onConfirm: () => void;
+}) {
+  const { refs, floatingStyles, middlewareData } = useFloating({
+    placement: "bottom",
+    strategy: "fixed",
+    transform: false,
+    middleware: [
+      inline(),
+      offset(4),
+      flip({ padding: 8 }),
+      shift({ padding: 8 }),
+      hide(),
+    ],
+    whileElementsMounted: autoUpdate,
+  });
+
+  useEffect(() => {
+    refs.setReference({
+      getBoundingClientRect: () => range.getBoundingClientRect(),
+      getClientRects: () => range.getClientRects(),
+    });
+  }, [range, refs]);
+
+  if (middlewareData.hide?.referenceHidden) {
+    return null;
+  }
+
+  return (
+    <button
+      className="flex items-center gap-1 rounded-md border border-border/50 bg-background px-2 py-1 text-[10px] font-medium text-foreground shadow-md hover:bg-accent"
+      onClick={onConfirm}
+      ref={refs.setFloating}
+      style={{ ...floatingStyles, zIndex: 10_000 }}
+      type="button"
+    >
+      <MessageSquareQuote className="size-3" />
+      追问
+    </button>
+  );
 }
 
 function ThreadMessageBubble({
