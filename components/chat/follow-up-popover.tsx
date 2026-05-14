@@ -7,7 +7,6 @@ import {
   inline,
   offset,
   shift,
-  size,
   useFloating,
 } from "@floating-ui/react-dom";
 import { motion } from "framer-motion";
@@ -43,8 +42,10 @@ export type PopoverBreadcrumb = {
   threadId: string;
 };
 
-const POPOVER_WIDTH = 380;
-const POPOVER_MAX_HEIGHT = 400;
+const POPOVER_WIDTH = 480;
+const POPOVER_MAX_HEIGHT = 520;
+const POPOVER_MIN_WIDTH = 320;
+const POPOVER_MIN_HEIGHT = 240;
 
 export type FollowUpPopoverAnchor =
   | { kind: "range"; range: Range }
@@ -95,6 +96,17 @@ export function FollowUpPopover({
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const conversationRef = useRef<HTMLDivElement>(null);
 
+  const [manualPos, setManualPos] = useState<{
+    top: number;
+    left: number;
+  } | null>(null);
+  const dragStateRef = useRef<{
+    startX: number;
+    startY: number;
+    originTop: number;
+    originLeft: number;
+  } | null>(null);
+
   const { refs, floatingStyles, middlewareData, isPositioned } = useFloating({
     placement: "bottom",
     strategy: "fixed",
@@ -105,15 +117,6 @@ export function FollowUpPopover({
       flip({ padding: 8 }),
       shift({ padding: 8 }),
       hide(),
-      size({
-        apply({ availableHeight, elements }) {
-          elements.floating.style.maxHeight = `${Math.min(
-            POPOVER_MAX_HEIGHT,
-            Math.max(180, availableHeight - 8)
-          )}px`;
-        },
-        padding: 8,
-      }),
     ],
     whileElementsMounted: autoUpdate,
   });
@@ -263,10 +266,11 @@ export function FollowUpPopover({
   const [nestedSelection, setNestedSelection] = useState<{
     text: string;
     msgId: string;
-    range: Range;
+    mouseClient: { x: number; y: number };
   } | null>(null);
 
-  const handleNestedMouseUp = useCallback(() => {
+  const handleNestedMouseUp = useCallback((e: React.MouseEvent) => {
+    const mouseClient = { x: e.clientX, y: e.clientY };
     setTimeout(() => {
       const sel = window.getSelection();
       if (!sel || sel.isCollapsed || !sel.rangeCount) {
@@ -289,12 +293,57 @@ export function FollowUpPopover({
         return;
       }
       const msgId = bubble.getAttribute("data-thread-msg-id") ?? "";
-      setNestedSelection({ text, msgId, range: range.cloneRange() });
+      setNestedSelection({ text, msgId, mouseClient });
     }, 100);
   }, []);
 
   const hasConversation = messages.length > 0;
   const referenceHidden = middlewareData.hide?.referenceHidden;
+
+  const handleHeaderMouseDown = useCallback(
+    (e: React.MouseEvent<HTMLDivElement>) => {
+      if ((e.target as HTMLElement).closest("button")) {
+        return;
+      }
+      e.preventDefault();
+      const floating = refs.floating.current;
+      if (!floating) {
+        return;
+      }
+      const rect = floating.getBoundingClientRect();
+      dragStateRef.current = {
+        startX: e.clientX,
+        startY: e.clientY,
+        originTop: rect.top,
+        originLeft: rect.left,
+      };
+
+      const onMove = (ev: MouseEvent) => {
+        const state = dragStateRef.current;
+        if (!state) {
+          return;
+        }
+        const nextTop = state.originTop + (ev.clientY - state.startY);
+        const nextLeft = state.originLeft + (ev.clientX - state.startX);
+        const maxLeft = window.innerWidth - 80;
+        const maxTop = window.innerHeight - 40;
+        setManualPos({
+          top: Math.min(Math.max(0, nextTop), maxTop),
+          left: Math.min(Math.max(0, nextLeft), maxLeft),
+        });
+      };
+
+      const onUp = () => {
+        dragStateRef.current = null;
+        document.removeEventListener("mousemove", onMove);
+        document.removeEventListener("mouseup", onUp);
+      };
+
+      document.addEventListener("mousemove", onMove);
+      document.addEventListener("mouseup", onUp);
+    },
+    [refs.floating]
+  );
   const shouldShow = isPositioned && !referenceHidden;
 
   const popoverContent = (
@@ -309,15 +358,29 @@ export function FollowUpPopover({
       initial={{ opacity: 0, y: 8, scale: 0.96 }}
       ref={refs.setFloating}
       style={{
-        ...floatingStyles,
+        ...(manualPos
+          ? { position: "fixed", top: manualPos.top, left: manualPos.left }
+          : floatingStyles),
         width: POPOVER_WIDTH,
+        height: POPOVER_MAX_HEIGHT,
+        minWidth: POPOVER_MIN_WIDTH,
+        minHeight: POPOVER_MIN_HEIGHT,
+        maxWidth: "min(90vw, 800px)",
+        maxHeight: "min(90vh, 800px)",
+        resize: "both",
+        overflow: "hidden",
         zIndex: 9999,
         pointerEvents: shouldShow ? "auto" : "none",
       }}
       transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
     >
-      {/* Header */}
-      <div className="flex items-center gap-2 border-b border-border/40 px-3 py-2">
+      {/* Header (draggable) */}
+      {/* biome-ignore lint/a11y/noStaticElementInteractions: header acts as window drag handle. */}
+      {/* biome-ignore lint/a11y/noNoninteractiveElementInteractions: header acts as window drag handle. */}
+      <div
+        className="flex shrink-0 cursor-move select-none items-center gap-2 border-b border-border/40 px-3 py-2"
+        onMouseDown={handleHeaderMouseDown}
+      >
         {breadcrumbs.length > 0 && (
           <button
             className="flex shrink-0 items-center text-muted-foreground transition-colors hover:text-foreground"
@@ -365,14 +428,10 @@ export function FollowUpPopover({
       {/* Conversation area */}
       {/* biome-ignore lint/a11y/noStaticElementInteractions: mouse selection inside this scroll region opens nested follow-up actions. */}
       <div
-        className="overflow-y-auto"
+        className="min-h-0 flex-1 overflow-y-auto"
         onMouseUp={handleNestedMouseUp}
         ref={conversationRef}
-        style={{
-          maxHeight: POPOVER_MAX_HEIGHT - 120,
-          minHeight: hasConversation ? 60 : 0,
-          display: hasConversation ? "block" : "none",
-        }}
+        style={{ display: hasConversation ? "block" : "none" }}
         tabIndex={-1}
       >
         <div className="relative flex flex-col gap-3 p-3">
@@ -395,7 +454,7 @@ export function FollowUpPopover({
       </div>
 
       {/* Input area */}
-      <div className="border-t border-border/40 p-2">
+      <div className="shrink-0 border-t border-border/40 p-2">
         <div className="flex items-end gap-2">
           <textarea
             className="max-h-20 min-h-[36px] flex-1 resize-none rounded-lg border border-border/40 bg-muted/30 px-3 py-2 text-xs leading-relaxed text-foreground placeholder:text-muted-foreground/60 focus:outline-none"
@@ -440,12 +499,12 @@ export function FollowUpPopover({
       {popoverContent}
       {nestedSelection && status !== "streaming" && (
         <NestedFollowUpButton
+          mouseClient={nestedSelection.mouseClient}
           onConfirm={() => {
             handleNestedFollowUp(nestedSelection.text, nestedSelection.msgId);
             setNestedSelection(null);
             window.getSelection()?.removeAllRanges();
           }}
-          range={nestedSelection.range}
         />
       )}
     </>,
@@ -454,36 +513,35 @@ export function FollowUpPopover({
 }
 
 function NestedFollowUpButton({
-  range,
+  mouseClient,
   onConfirm,
 }: {
-  range: Range;
+  mouseClient: { x: number; y: number };
   onConfirm: () => void;
 }) {
-  const { refs, floatingStyles, middlewareData } = useFloating({
-    placement: "bottom",
+  const { refs, floatingStyles } = useFloating({
+    placement: "top",
     strategy: "fixed",
     transform: false,
-    middleware: [
-      inline(),
-      offset(4),
-      flip({ padding: 8 }),
-      shift({ padding: 8 }),
-      hide(),
-    ],
+    middleware: [offset(8), flip({ padding: 8 }), shift({ padding: 8 })],
     whileElementsMounted: autoUpdate,
   });
 
   useEffect(() => {
     refs.setReference({
-      getBoundingClientRect: () => range.getBoundingClientRect(),
-      getClientRects: () => range.getClientRects(),
+      getBoundingClientRect: () => ({
+        x: mouseClient.x,
+        y: mouseClient.y,
+        top: mouseClient.y,
+        left: mouseClient.x,
+        right: mouseClient.x,
+        bottom: mouseClient.y,
+        width: 0,
+        height: 0,
+        toJSON: () => ({}),
+      }),
     });
-  }, [range, refs]);
-
-  if (middlewareData.hide?.referenceHidden) {
-    return null;
-  }
+  }, [mouseClient, refs]);
 
   return (
     <button
@@ -548,35 +606,46 @@ function ThreadMessageBubble({
     );
   }
 
-  const content = messageText + (isStreaming && isLatestAssistant ? "▍" : "");
+  const showThinking = !messageText && isStreaming && isLatestAssistant;
   const hasQuotes = !isStreaming && quotes.length > 0 && onAnchorClick;
 
   return (
     <div className="flex justify-start" data-thread-msg-id={message.id}>
       <div className="max-w-[95%] text-xs leading-relaxed">
-        {content ? (
-          hasQuotes ? (
-            <AnnotatedText
-              onAnchorClick={(threadId, quoteId) => {
-                const q = quotes.find((item) => item.id === quoteId);
-                if (!q || !onAnchorClick) {
-                  return;
-                }
-                onAnchorClick({
-                  quoteText: q.quoteText,
-                  sourceMessageId: q.sourceMessageId,
-                  threadId,
-                });
-              }}
-              onUnlink={handleUnlink}
-              quotes={quotes}
-              text={content}
-            />
-          ) : (
-            <MessageResponse>{content}</MessageResponse>
-          )
+        {showThinking ? (
+          <span className="inline-flex items-center gap-1 text-muted-foreground">
+            <span className="size-1.5 animate-pulse rounded-full bg-muted-foreground/60" />
+            思考中...
+          </span>
         ) : (
-          <span className="text-muted-foreground">思考中...</span>
+          <>
+            {hasQuotes ? (
+              <AnnotatedText
+                onAnchorClick={(threadId, quoteId) => {
+                  const q = quotes.find((item) => item.id === quoteId);
+                  if (!q || !onAnchorClick) {
+                    return;
+                  }
+                  onAnchorClick({
+                    quoteText: q.quoteText,
+                    sourceMessageId: q.sourceMessageId,
+                    threadId,
+                  });
+                }}
+                onUnlink={handleUnlink}
+                quotes={quotes}
+                text={messageText}
+              />
+            ) : (
+              <MessageResponse>{messageText}</MessageResponse>
+            )}
+            {isStreaming && isLatestAssistant && (
+              <span
+                aria-hidden="true"
+                className="ml-0.5 inline-block h-3 w-1.5 translate-y-[2px] animate-pulse bg-foreground/70 align-baseline"
+              />
+            )}
+          </>
         )}
       </div>
     </div>
