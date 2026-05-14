@@ -295,10 +295,15 @@ export function FollowUpPopover({
 
   const hasConversation = messages.length > 0;
   const referenceHidden = middlewareData.hide?.referenceHidden;
+  const shouldShow = isPositioned && !referenceHidden;
 
   const popoverContent = (
     <motion.div
-      animate={{ opacity: 1, y: 0, scale: 1 }}
+      animate={
+        shouldShow
+          ? { opacity: 1, y: 0, scale: 1 }
+          : { opacity: 0, y: 8, scale: 0.96 }
+      }
       className="flex flex-col overflow-hidden rounded-xl border border-border/60 bg-background shadow-xl"
       exit={{ opacity: 0, y: 4, scale: 0.98 }}
       initial={{ opacity: 0, y: 8, scale: 0.96 }}
@@ -307,7 +312,7 @@ export function FollowUpPopover({
         ...floatingStyles,
         width: POPOVER_WIDTH,
         zIndex: 9999,
-        visibility: referenceHidden ? "hidden" : "visible",
+        pointerEvents: shouldShow ? "auto" : "none",
       }}
       transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
     >
@@ -432,7 +437,7 @@ export function FollowUpPopover({
 
   return createPortal(
     <>
-      {isPositioned && popoverContent}
+      {popoverContent}
       {nestedSelection && status !== "streaming" && (
         <NestedFollowUpButton
           onConfirm={() => {
