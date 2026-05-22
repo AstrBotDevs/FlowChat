@@ -3,6 +3,10 @@
 一个以“理解、追问、连续阅读”为核心的沉浸式 AI Chatbot。
 An immersive AI Chatbot focused on in-place follow-up questions and continuous reading.
 
+## 🌐 在线体验
+
+线上体验地址：[https://flow-chat-azure.vercel.app/](https://flow-chat-azure.vercel.app/)
+
 ## 🎯 目标产品形态
 
 Flow Chat 致力于将与 AI 的交互从传统的“单线问答”升级为**原位展开的深度认知体验**。
