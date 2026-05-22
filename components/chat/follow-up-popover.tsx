@@ -67,6 +67,7 @@ export function FollowUpPopover({
   modelSelection,
   anchor,
   onClose,
+  onQuoteCreated,
   breadcrumbs: externalBreadcrumbs,
 }: {
   chatId: string;
@@ -77,6 +78,8 @@ export function FollowUpPopover({
   modelSelection: ModelSelection;
   anchor: FollowUpPopoverAnchor;
   onClose: (hasMessages: boolean) => void;
+  // 首次追问发出且服务端已写入 Quote 后触发，父组件用它即时刷新下划线
+  onQuoteCreated?: () => void;
   breadcrumbs?: PopoverBreadcrumb[];
 }) {
   const [inputValue, setInputValue] = useState("");
@@ -153,6 +156,7 @@ export function FollowUpPopover({
     sourceThreadId: currentSourceThreadId,
     existingThreadId: currentExistingThreadId,
     modelSelection,
+    onThreadCreated: onQuoteCreated,
   });
 
   useEffect(() => {

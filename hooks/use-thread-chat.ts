@@ -45,6 +45,7 @@ export function useThreadChat({
   sourceThreadId,
   existingThreadId,
   modelSelection,
+  onThreadCreated,
 }: {
   chatId: string;
   sourceMessageId: string;
@@ -52,6 +53,8 @@ export function useThreadChat({
   sourceThreadId: string | null;
   existingThreadId?: string;
   modelSelection: ModelSelection;
+  // 新建 thread 且服务端成功写入 Quote 后触发，用于让父组件立即刷新下划线标记
+  onThreadCreated?: () => void;
 }) {
   const [messages, setMessages] = useState<UIMessage[]>([]);
   const [status, setStatus] = useState<ThreadChatStatus>("idle");
@@ -137,6 +140,12 @@ export function useThreadChat({
           return;
         }
 
+        // 服务端在响应 headers 之前已完成 createQuote 写库，
+        // 此处立即回调，让父组件刷新主消息上的下划线锚点
+        if (isNewThread) {
+          onThreadCreated?.();
+        }
+
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
         let buffer = "";
@@ -207,6 +216,7 @@ export function useThreadChat({
       sourceMessageId,
       quoteText,
       sourceThreadId,
+      onThreadCreated,
     ]
   );
 

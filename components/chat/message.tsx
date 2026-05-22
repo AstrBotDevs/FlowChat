@@ -451,6 +451,7 @@ const PurePreviewMessage = ({
           existingThreadId={activePopover.existingThreadId}
           modelSelection={modelSelection ?? DEFAULT_MODEL_SELECTION}
           onClose={handlePopoverClose}
+          onQuoteCreated={mutateQuotes}
           quoteText={activePopover.quoteText}
           sourceMessageId={activePopover.sourceMessageId}
           sourceThreadId={activePopover.sourceThreadId}
