@@ -7,6 +7,9 @@ An immersive AI Chatbot focused on in-place follow-up questions and continuous r
 
 线上体验地址：[https://flow-chat-azure.vercel.app/](https://flow-chat-azure.vercel.app/)
 
+## Demo 示例
+<img width="2030" height="1842" alt="image" src="https://github.com/user-attachments/assets/8c23e46a-64f1-4886-8cee-c011f0b2e1f8" />
+
 ## 🎯 目标产品形态
 
 Flow Chat 致力于将与 AI 的交互从传统的“单线问答”升级为**原位展开的深度认知体验**。
